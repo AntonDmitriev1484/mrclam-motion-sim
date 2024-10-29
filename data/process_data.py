@@ -117,7 +117,7 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
         return estimate_point
 
 
-def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, T, mes_pose=None):
+def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, mes_pose=None):
     # cluster SLAM_T means the period that SLAM is run on any client.
     # compute path for robot_id.
     robot_id-=1 # Note robot_id should be between 0 and 4
@@ -130,11 +130,10 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, T, mes_pose
 
     approx_pose = [all_gt_pose[robot_id][0]] #starts at ground truth
 
-    dbg_view = 120*100 # might be good to look at 2500-3000 as thats when we enter a curve
-    # Better to look at the first curve though 0-3000
+    dbg_view = sim_time
+    # dbg_view = 120*100 
     ref_id = 1 #crashes when you set ref_id = 2?
     # (less) fucked when you hard code ref_id to be 1.
-    # lets just always reference the 3rd robot for now
 
     fig, ax = plt.subplots()
     ax.set_xlim(-0.5,3.5)
@@ -144,7 +143,9 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, T, mes_pose
     # TODO: Ok now its just not running the loop for some reason weird.
     for t in range(1,dbg_view):
         # If its time for some client in our cluster to get slammed
-        if t % range_T == 0:
+        if t % SLAM_T == 0:
+            approx_pose.append(all_gt_pose[robot_id][t])
+        elif t % range_T == 0:
             imu_pose = np.array([ approx_pose[-1].x, approx_pose[-1].y ])
             imu_dir_abs_radians = approx_pose[-1].orientation
 
@@ -287,8 +288,9 @@ for i in range(1,3):
 # Originally had this set to 300 -> one slam every 3000ms
 range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
 # This frequency makes a big impact on how long we can track the pose with ground truth
+SLAM_T = 300 # 5 robots, round robin offload on each, so robot 1 gets a SLAM result every 1500ms
 
 for i in range(1,2):
-    approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, T, mes_pose=all_mes_pose)
+    approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, T, SLAM_T, mes_pose=all_mes_pose)
     # write_pose_data_TUM(f"R{i}_alg1", approx_pose[:1000])
     write_pose_data_TUM(f"R{i}_alg1", approx_pose)
