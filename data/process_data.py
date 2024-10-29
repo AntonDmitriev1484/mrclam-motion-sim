@@ -67,7 +67,7 @@ def rotate_vector(vector, degrees):
                                 [np.sin(r),  np.cos(r)]])
     return np.dot(vector, rotation_matrix)
 
-DBG = False
+DBG = True
 def dv(start, end, plt, label=None, color='000000'):
         if DBG == True: return plt.arrow(start[0], start[1], (end-start)[0], (end-start)[1], color=color, label=label)
         else: return None
@@ -75,14 +75,14 @@ def dv(start, end, plt, label=None, color='000000'):
 
 def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
         
-        dv(imu_pose, imu_pose + 0.5*(imu_dir)/np.linalg.norm(imu_dir), plt, color='red' )
+        # dv(imu_pose, imu_pose + 0.5*(imu_dir)/np.linalg.norm(imu_dir), plt, color='red' )
 
         # A - B creates an arrow from tip of B to tip of A
         UWB_range = np.linalg.norm(ref_pose - true_pose) # defines a circle radius # Might be signage on this
         # dv(true_pose, ref_pose, plt, color='blue', label='UWB_range')
 
         v_0 = imu_pose - ref_pose # Vector from ref to imu
-        dv(ref_pose, ref_pose+v_0, plt, color='blue')
+        # dv(ref_pose, ref_pose+v_0, plt, color='blue')
 
         v_UWB = UWB_range * (v_0 / np.linalg.norm(v_0)) # Vector from imu to edge of the UWB circle, in the direction of IMU
 
@@ -90,30 +90,30 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
 
         pivot = ref_pose + v_UWB # v_1 and v_2 both rotate about this point
 
-        dv(pivot, pivot + v_1, plt, color='purple')
+        # dv(pivot, pivot + v_1, plt, color='purple')
 
-        dv(imu_pose, imu_pose+(0.5*rotate_vector(v_0, 90)/np.linalg.norm(v_0)), plt, color='blue')
+        # dv(imu_pose, imu_pose+(0.5*rotate_vector(v_0, 90)/np.linalg.norm(v_0)), plt, color='blue')
 
         A = np.arccos(np.dot(imu_dir,v_1)/ (np.linalg.norm(imu_dir)*np.linalg.norm(v_1))) # IN RADIANS
         S = np.dot(rotate_vector(v_1, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_1, 90), imu_dir))
         B = (A-np.radians(90))/abs(A-np.radians(90)) # 90 is 1.5708 radians
-        print(f"A {np.degrees(A)} S {S} B {B}")
+        # print(f"A {np.degrees(A)} S {S} B {B}")
 
         rot_angle = -B*S*A
         if B<0: rot_angle = -B*S*(np.radians(90)-A)
-        print(f"rot_angle {np.degrees(rot_angle)}")
+        # print(f"rot_angle {np.degrees(rot_angle)}")
 
         v_2 = rotate_vector(v_1, np.degrees(-B*S*A))
         if B<0: v_2 = rotate_vector(v_1, np.degrees(-B*S*(1.5708-A)))
 
-        dv(pivot, pivot+v_2, plt, color='orange')
+        # dv(pivot, pivot+v_2, plt, color='orange')
 
         v_steer = (pivot + v_2) - ref_pose
-        dv(ref_pose , ref_pose + v_steer, plt, color='orange')
+        # dv(ref_pose , ref_pose + v_steer, plt, color='orange')
 
         estimate_point = UWB_range * (v_steer / np.linalg.norm(v_steer))
         
-        if DBG: plt.scatter(estimate_point[0], estimate_point[1], color = 'pink', s=20)
+        # if DBG: plt.scatter(estimate_point[0], estimate_point[1], color = 'pink', s=20)
         return estimate_point
 
 
@@ -130,22 +130,24 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
 
     approx_pose = [all_gt_pose[robot_id][0]] #starts at ground truth
 
-    dbg_view = sim_time
+    # dbg_view = sim_time
     # dbg_view = 120*100 
-    ref_id = 1 #crashes when you set ref_id = 2?
-    # (less) fucked when you hard code ref_id to be 1.
+    dbg_view = 300 # range_T = 30
+    ref_id = 1 
 
     fig, ax = plt.subplots()
     ax.set_xlim(-0.5,3.5)
     ax.set_ylim(-3.5,0.5)
     ax.grid(True)
 
-    # TODO: Ok now its just not running the loop for some reason weird.
+    theta_adjust = 0
+
     for t in range(1,dbg_view):
         # If its time for some client in our cluster to get slammed
-        if t % SLAM_T == 0:
-            approx_pose.append(all_gt_pose[robot_id][t])
-        elif t % range_T == 0:
+
+        # if t % SLAM_T == 0:
+        #     approx_pose.append(all_gt_pose[robot_id][t])
+        if t % range_T == 0:
             imu_pose = np.array([ approx_pose[-1].x, approx_pose[-1].y ])
             imu_dir_abs_radians = approx_pose[-1].orientation
 
@@ -154,26 +156,43 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
             ref_pose = np.array((0,0))
             # ref_pose = np.array([ all_gt_pose[ref_id][t].x , all_gt_pose[ref_id][t].y ])
 
-            # Maybe it breaks here because it can't handle a non-(0,0) ref_pose?
-            # 1. Math can't handle cases with a non-(0,0) origin (for some reason idk)
-            # 2. Inaccuracies in orientation, lead to more inaccuracies in the endpoint of IMU path, which makes our next point miss the circle even further.
-            # -> i.e. we still have drift. # This might be due to the presence of forward velocity drift / changing forward velocity in the data?
-            # 3. Currently we're getting a bunch of disjoint segments, need to merge them together 
-            # s.t. we get a smooth path, and also rotate segments properly relative to each other.
-
-            # - How do we estimate for orientation?
-            # - Why does the math make us jump to the side, immediately after the first segment? It should keep us on top of the ground truth instead.
-
-            # Did I introduce forward drift by upsampling the number of points?
-
-            # - plot an X at the imu_pose and true_pose at each SLAM instance this will show us how severe the forward drift is
-
             # plt.scatter(true_pose[0], true_pose[1], color='green', s=20)
             # plt.scatter(imu_pose[0], imu_pose[1], color='red', s=20)
 
-            approx = trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt)
-            do = vo.av * dT
-            pose_estimate = Pose(t, approx[0], approx[1], imu_dir_abs_radians + do)
+            predict_point = trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt)
+
+            seg_start_point = np.array((approx_pose[-range_T].x, approx_pose[-range_T].y)) # Get the pose 200ms in the past
+            seg_end_point = np.array((approx_pose[-1].x ,approx_pose[-1].y)) # Latest pose from normal IMU integration is our end point
+
+            v_a = seg_end_point - seg_start_point
+
+            v_steer = predict_point - seg_start_point
+            # SO the problem is that v_steer is super super far off because of forward drift, and it adds a ton of angular error
+            
+            # Scale how far our point is projected based off of how little change in angle we have
+            # Multiply v_2 by angle change
+            # 0 angle change, 0 outwards projection, will fix this forward drift fuckery for the initial forward motion.
+
+            dv(seg_start_point, v_steer + seg_start_point, plt, color='purple')
+
+            v_b = (v_steer / np.linalg.norm(v_steer)) * np.linalg.norm(v_a)
+
+            if range_T == t:
+                print(seg_start_point)
+                print(seg_end_point)
+                print(v_a)
+                print(v_b)
+                print(approx_pose)
+
+            theta_adjust += np.arccos( np.dot(v_a, v_b) / (np.linalg.norm(v_a) * np.linalg.norm(v_b)))
+            # I think the theta_adjust we're adding on to each point is probably too large.
+
+            final_predict = seg_start_point + v_b # So that we are aligned tip-to-tail (more or less).
+            dv(seg_start_point, final_predict, plt, color='blue')
+            #TODO: Why is v_a the right vector to put here and not v_b?
+
+            do = (vo.av) * dT
+            pose_estimate = Pose(t, final_predict[0], final_predict[1], imu_dir_abs_radians + theta_adjust + do)
             approx_pose.append(pose_estimate)
 
             # prev_pose = approx_pose[-1]
@@ -191,7 +210,7 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
 
             dy = vo.fv * dT * math.sin(prev_pose.orientation)         # sin = O/H
             dx = vo.fv * dT * math.cos(prev_pose.orientation)        # cos = A/H
-            do = vo.av * dT
+            do = (vo.av) * dT
             cur_pose = Pose(t, prev_pose.x + dx, prev_pose.y + dy, prev_pose.orientation + do)
             
             approx_pose.append(cur_pose)
