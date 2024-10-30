@@ -69,11 +69,13 @@ def rotate_vector(vector, degrees):
                                 [np.sin(r),  np.cos(r)]])
     return np.dot(vector, rotation_matrix)
 
-DBG = False
+DBG = True
 def dv(start, end, plt, label=None, color='000000'):
         if DBG == True: return plt.arrow(start[0], start[1], (end-start)[0], (end-start)[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
         else: return None
 
+def vec_angle(v_1, v_2):
+    return np.arccos(np.dot(v_1,v_2)/ (np.linalg.norm(v_1)*np.linalg.norm(v_2)))
 
 def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
         
@@ -143,7 +145,7 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     # dbg_view = sim_time
     dbg_view = 120*100 
-    # dbg_view = 61 # range_T = 30
+    # dbg_view = 121 # range_T = 30
     ref_id = 1 
 
     fig, ax = plt.subplots()
@@ -153,6 +155,8 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     theta_adjust = 0
     sum_delta_angle = 0
+
+    pose_buffer = [] # emptied every ranging interval, raw (x,y)
 
     for t in range(1,dbg_view):
         # If its time for some client in our cluster to get slammed
@@ -172,43 +176,48 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             # plt.scatter(imu_pose[0], imu_pose[1], color='red', s=20)
 
             predict_point = trig_approx(ref_pose, true_pose, imu_pose, imu_dir, sum_delta_angle, plt)
+
+            # Once we get our predict_point, set it on a line perpendicular to our segment end.
+
             # final_predict = predict_point
 
             seg_start_point = np.array((approx_pose[-range_T].x, approx_pose[-range_T].y)) # Get the pose 200ms in the past
             seg_end_point = np.array((approx_pose[-1].x ,approx_pose[-1].y)) # Latest pose from normal IMU integration is our end point
 
-            v_a = seg_end_point - seg_start_point
 
+            # I have genuinely no clue why this is still overlapping vectors together
+            adj_A = seg_end_point - predict_point
+            adj_B = seg_end_point - seg_start_point
+            theta = np.radians(90) - vec_angle(adj_B, adj_A)
+            opp = np.linalg.norm(adj_B) * np.sin(theta)
+            predict_point += opp * adj_A / np.linalg.norm(adj_A)
+
+
+            v_a = seg_end_point - seg_start_point # by using v_a we are just using the imu data
             v_steer = predict_point - seg_start_point
-            # SO the problem is that v_steer is super super far off because of forward drift, and it adds a ton of angular error
-            
-            # Scale how far our point is projected based off of how little change in angle we have
-            # Multiply v_2 by angle change
-            # 0 angle change, 0 outwards projection, will fix this forward drift fuckery for the initial forward motion.
-            # Or rotate backwards based on the accumulated angular difference
-
-            dv(seg_start_point, v_steer + seg_start_point, plt, color='purple')
-
+            # dv(seg_start_point, v_steer + seg_start_point, plt, color='purple')
             v_b = (v_steer / np.linalg.norm(v_steer)) * np.linalg.norm(v_a)
-
-            # if range_T == t:
-            #     print(seg_start_point)
-            #     print(seg_end_point)
-            #     print(v_a)
-            #     print(v_b)
-            #     print(approx_pose)
-
-            dv(seg_start_point + v_a, seg_start_point + v_b, plt)
-
-            theta_adjust += np.arccos( np.dot(v_a, v_b) / (np.linalg.norm(v_a) * np.linalg.norm(v_b)))
+            # dv(seg_start_point + v_a, seg_start_point + v_b, plt)
+            theta_adjust = np.arccos( np.dot(v_a, v_b) / (np.linalg.norm(v_a) * np.linalg.norm(v_b)))
             # I think the theta_adjust we're adding on to each point is probably too large.
 
-            final_predict = seg_start_point + v_b # So that we are aligned tip-to-tail (more or less).
+
+            final_predict = predict_point # So that we are aligned tip-to-tail (more or less).
+            # final_predict = seg_start_point + v_a # So that we are aligned tip-to-tail (more or less).
             # dv(seg_start_point, final_predict, plt, color='blue')
+
             #TODO: Why is v_a the right vector to put here and not v_b?
 
+            # v_b seems to be grotesquely off 100% of the time
+
             do = (vo.av) * dT
-            pose_estimate = Pose(t, final_predict[0], final_predict[1], imu_dir_abs_radians + do)
+            # TODO: The signage with which we add theta_adjust to imu_dir_abs_radians should depend on what direction we adjusted towards initially.
+            # + clockwise and - counterclockwise?
+            # How to determine signage on theta_adjust?
+            sign = 90 - vec_angle(rotate_vector(v_a, +90), v_b)
+            sign /= abs(sign)
+
+            pose_estimate = Pose(t, final_predict[0], final_predict[1], imu_dir_abs_radians  + do)
             approx_pose.append(pose_estimate)
 
             # prev_pose = approx_pose[-1]
