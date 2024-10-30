@@ -10,11 +10,13 @@ def crop_data(gt_pose, vo):
     end_gt_pose = gt_pose[-1][0]
     start_vo = vo[0][0]
     end_vo = vo[-1][0]
+
     # If start_vo starts after start_gt_pose cut pose data to start at the same time as start_vo
     if start_gt_pose < start_vo:
         gt_pose = list(filter(lambda x: x[0]>start_vo , gt_pose))
     else:
         vo = list(filter(lambda x: x[0]>start_gt_pose , vo))
+
     # If vo ends after gt_pose  cut vo data to end at gt_pose data
     if end_gt_pose < end_vo:
         vo = list(filter(lambda x: x[0]<end_gt_pose , vo))
@@ -67,13 +69,13 @@ def rotate_vector(vector, degrees):
                                 [np.sin(r),  np.cos(r)]])
     return np.dot(vector, rotation_matrix)
 
-DBG = True
+DBG = False
 def dv(start, end, plt, label=None, color='000000'):
-        if DBG == True: return plt.arrow(start[0], start[1], (end-start)[0], (end-start)[1], color=color, label=label)
+        if DBG == True: return plt.arrow(start[0], start[1], (end-start)[0], (end-start)[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
         else: return None
 
 
-def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
+def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
         
         # dv(imu_pose, imu_pose + 0.5*(imu_dir)/np.linalg.norm(imu_dir), plt, color='red' )
 
@@ -106,6 +108,15 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
         v_2 = rotate_vector(v_1, np.degrees(-B*S*A))
         if B<0: v_2 = rotate_vector(v_1, np.degrees(-B*S*(1.5708-A)))
 
+        TURN_CEIL = 1.5708
+        print(f"seg_delta_angle {seg_delta_angle}")
+        v_2 *= (seg_delta_angle / TURN_CEIL)**5
+        print(v_2) # SO even when we hard set this to 0, it still skews? Why???
+        # Now need to somehow scale v_2 by seg_delta_angle
+        # if seg_delta_angle is 0, we want v_2 to be 0
+        # otherwise, we want v_2 to max out at 1, lets assume 1.708 rad (90 degree) is the max turning we can do in one segment
+        # I think this threshold should scale with our range_T, longer range_T means higher turn ceiling.
+
         # dv(pivot, pivot+v_2, plt, color='orange')
 
         v_steer = (pivot + v_2) - ref_pose
@@ -117,7 +128,7 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt=None):
         return estimate_point
 
 
-def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, mes_pose=None):
+def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # cluster SLAM_T means the period that SLAM is run on any client.
     # compute path for robot_id.
     robot_id-=1 # Note robot_id should be between 0 and 4
@@ -131,8 +142,8 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
     approx_pose = [all_gt_pose[robot_id][0]] #starts at ground truth
 
     # dbg_view = sim_time
-    # dbg_view = 120*100 
-    dbg_view = 300 # range_T = 30
+    dbg_view = 120*100 
+    # dbg_view = 61 # range_T = 30
     ref_id = 1 
 
     fig, ax = plt.subplots()
@@ -141,6 +152,7 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
     ax.grid(True)
 
     theta_adjust = 0
+    sum_delta_angle = 0
 
     for t in range(1,dbg_view):
         # If its time for some client in our cluster to get slammed
@@ -159,7 +171,8 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
             # plt.scatter(true_pose[0], true_pose[1], color='green', s=20)
             # plt.scatter(imu_pose[0], imu_pose[1], color='red', s=20)
 
-            predict_point = trig_approx(ref_pose, true_pose, imu_pose, imu_dir, plt)
+            predict_point = trig_approx(ref_pose, true_pose, imu_pose, imu_dir, sum_delta_angle, plt)
+            # final_predict = predict_point
 
             seg_start_point = np.array((approx_pose[-range_T].x, approx_pose[-range_T].y)) # Get the pose 200ms in the past
             seg_end_point = np.array((approx_pose[-1].x ,approx_pose[-1].y)) # Latest pose from normal IMU integration is our end point
@@ -172,27 +185,30 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
             # Scale how far our point is projected based off of how little change in angle we have
             # Multiply v_2 by angle change
             # 0 angle change, 0 outwards projection, will fix this forward drift fuckery for the initial forward motion.
+            # Or rotate backwards based on the accumulated angular difference
 
             dv(seg_start_point, v_steer + seg_start_point, plt, color='purple')
 
             v_b = (v_steer / np.linalg.norm(v_steer)) * np.linalg.norm(v_a)
 
-            if range_T == t:
-                print(seg_start_point)
-                print(seg_end_point)
-                print(v_a)
-                print(v_b)
-                print(approx_pose)
+            # if range_T == t:
+            #     print(seg_start_point)
+            #     print(seg_end_point)
+            #     print(v_a)
+            #     print(v_b)
+            #     print(approx_pose)
+
+            dv(seg_start_point + v_a, seg_start_point + v_b, plt)
 
             theta_adjust += np.arccos( np.dot(v_a, v_b) / (np.linalg.norm(v_a) * np.linalg.norm(v_b)))
             # I think the theta_adjust we're adding on to each point is probably too large.
 
             final_predict = seg_start_point + v_b # So that we are aligned tip-to-tail (more or less).
-            dv(seg_start_point, final_predict, plt, color='blue')
+            # dv(seg_start_point, final_predict, plt, color='blue')
             #TODO: Why is v_a the right vector to put here and not v_b?
 
             do = (vo.av) * dT
-            pose_estimate = Pose(t, final_predict[0], final_predict[1], imu_dir_abs_radians + theta_adjust + do)
+            pose_estimate = Pose(t, final_predict[0], final_predict[1], imu_dir_abs_radians + do)
             approx_pose.append(pose_estimate)
 
             # prev_pose = approx_pose[-1]
@@ -203,16 +219,20 @@ def measured_vo_to_algo1(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, T, 
             # cur_pose = Pose(t, prev_pose.x + dx, prev_pose.y + dy, prev_pose.orientation + do)
             
             # approx_pose.append(cur_pose)
+            sum_delta_angle = 0
         else:
             # Otherwise just append VO data
             vo = all_mes_vo[robot_id][t]
             prev_pose = approx_pose[-1]
 
+            # Somehow we're getting way denser points ~2x than VO integration, why? we aren't moving forward enough?
             dy = vo.fv * dT * math.sin(prev_pose.orientation)         # sin = O/H
             dx = vo.fv * dT * math.cos(prev_pose.orientation)        # cos = A/H
             do = (vo.av) * dT
             cur_pose = Pose(t, prev_pose.x + dx, prev_pose.y + dy, prev_pose.orientation + do)
             
+            sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
+
             approx_pose.append(cur_pose)
 
     x, y = ([p.x for p in approx_pose[:dbg_view]] , [p.y for p in approx_pose[:dbg_view]])
@@ -310,6 +330,6 @@ range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Sla
 SLAM_T = 300 # 5 robots, round robin offload on each, so robot 1 gets a SLAM result every 1500ms
 
 for i in range(1,2):
-    approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, T, SLAM_T, mes_pose=all_mes_pose)
+    approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
     # write_pose_data_TUM(f"R{i}_alg1", approx_pose[:1000])
     write_pose_data_TUM(f"R{i}_alg1", approx_pose)
