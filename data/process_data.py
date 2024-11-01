@@ -108,10 +108,10 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=Non
         v_2 = rotate_vector(v_1, np.degrees(-B*S*A))
         if B<0: v_2 = rotate_vector(v_1, np.degrees(-B*S*(1.5708-A)))
 
-        # TURN_CEIL = 1.5708
         TURN_CEIL = 0.10745999999999996
         print(f"seg_delta_angle {seg_delta_angle}")
         v_2 *= (seg_delta_angle / TURN_CEIL)**5
+
         # print(v_2) # SO even when we hard set this to 0, it still skews? Why???
         # Now need to somehow scale v_2 by seg_delta_angle
         # if seg_delta_angle is 0, we want v_2 to be 0
@@ -321,7 +321,8 @@ for i in range(1,3):
 
     # write_pose_data_TUM(f"R{i}_mes", mes_pose)
     # write_pose_data_TUM(f"R{i}_gt", gt_pose[:1000])
-    write_pose_data_TUM(f"R{i}_gt", gt_pose)
+    debug_crop = 120*100
+    write_pose_data_TUM(f"R{i}_gt", gt_pose[:debug_crop])
     # write_pose_data_TUM(f"R{i}_fSLAM", fSLAM_pose)
 
 
@@ -330,7 +331,8 @@ for i in range(1,3):
 # Originally had this set to 300 -> one slam every 3000ms
 range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
 # This frequency makes a big impact on how long we can track the pose with ground truth
-SLAM_T = 1800 #SLAMMING every 3s
+SLAM_T = 1800
+
 
 for i in range(1,2):
     approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
