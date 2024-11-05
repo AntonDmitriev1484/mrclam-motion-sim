@@ -8,6 +8,8 @@ from scipy.spatial.transform import Rotation as R
 
 #Immutable by design
 Pose = namedtuple('Pose', ["time","x","y","orientation"])
+State = namedtuple('State', ['x','y','o']) # Pose but less verbose
+
 Odometry = namedtuple('Odometry', ["time","fv","av"])
 TUMPose = namedtuple('TUMPose', ["timestamp","tx","ty","tz","qx","qy","qz","qw"])
 #https://cvg.cit.tum.de/data/datasets/rgbd-dataset/file_formats
