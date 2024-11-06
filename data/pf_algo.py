@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 from load_data import * 
+from dataclasses import dataclass
+from scipy.stats import multivariate_normal
 
 T=100
 fig, ax = plt.subplots()
@@ -52,99 +54,102 @@ def State2Vec(state): # Returns <x,y>, orientation
 def Vec2State(state):
     return State()
 
+
+# Mutable named tuples, require evo-slam environment python 3.7!
+@dataclass
+class Particle:
+    x: float
+    y: float
+    o: float
+    weight: float
+    
+def Particle2StateVec(particle):
+    return np.array((particle.x, particle.y, particle.o))
+
 class ParticleFilter1:
-
-    def __init__(self, n_particles, imu_segment, uwb_ref, uwb_range):
+    def __init__(self, n_particles):
         self.n_particles = n_particles
-        self.seg = imu_segment
-        self.pose = imu_segment[-1]
-        self.ref = uwb_ref
-        self.range = uwb_range
-        self.particles = [State(0,0,0) for i in range(0,n_particles)]
-        self.weights = [0 for i in range(0, n_particles)]
+        self.particles = []
 
-    def generate(self): # Why not drawing anything?
-        # Generate points in a circle around pose with the length of the segment
-        start_pos, start_or = State2Vec(self.seg[0])
-        end_pos, end_or = State2Vec(self.pose)
+    def generate(self, start_pose):
+        # Radius of x,y s in our Gaussian multivariate
+        r_dist = 1 # maximum distance of a particlef from start is 1meter in any direction
+        max_turn = np.pi / 2 # maximum turn is 45 degrees
 
-        seg_len = norm(end_pos - start_pos) # circle radius
-        area = 2 * seg_len * np.pi
+        mean_state = np.array((start_pose.x, start_pose.y, start_pose.orientation))
+    
+        var_x = (r_dist/3)**2
+        var_y = var_x
+        var_o = (max_turn/3)**2
+        variances = np.array([var_x, var_y, var_o])
+        covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
 
-        # This should be calculated out of VO angular velocity not out of the integrated change!!!
-        # TODO: How do we add uniform noise (within a range that scales with segment curvature) to the orientation of each particle
-
-        # Evenly spread n_particles (x,y)s over the interior of this circle
-        # Just draw from uniform distribution
+        # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(0, self.n_particles):
-            r = random.uniform(0, seg_len)
+            r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
 
-            pos_x = self.pose.x + r * np.cos(theta)
-            pos_y = self.pose.y + r * np.sin(theta)
-            # Direction of our current pose + some variance based on segment curvature
-            ori = self.pose.o + random.uniform(-np.pi/2 , +np.pi/2) # For now we will just add +- 45deg to wherever the last pose is pointing
-            # TODO: THe range that we draw in uniform should scale with the distribution of angular changes along the segment 
-            self.particles[i] = State(pos_x, pos_y, ori)
-            self.weights[i] = 1/self.n_particles # Because we're creating them from uniform distribution
+            pos_x = start_pose.x + r * np.cos(theta)
+            pos_y = start_pose.y + r * np.sin(theta)
+            ori = start_pose.orientation + random.uniform(-np.pi/2 , +np.pi/2)
+
+            particle = Particle(pos_x,pos_y,ori,0)
+            weight =  multivariate_normal.pdf(Particle2StateVec(particle), mean=mean_state, cov=covariance)
+            particle.weight = weight
 
         for part in self.particles:
             dparticle(part, color='purple')
 
         return None
     
-    def generate_gaussian(self):
-        #    particles[:, 0] = mean[0] + (randn(N) * std[0])
+    def update(self, vo):
+        # Update each particle according to visual odometry measurement
+        dT = 1/T
+        for i in range(self.n_particles):
+            dy = vo.fv * dT * math.sin(self.particles[i].o)         # sin = O/H
+            dx = vo.fv * dT * math.cos(self.particles[i].o)        # cos = A/H
+            do = (vo.av) * dT
+            self.particles[i].x += dx
+            self.particles[i].y += dy
+            self.particles[i].o += do
 
-        # Generate points in a gaussian circle around pose with the length of the segment
-        start_pos, start_or = State2Vec(self.seg[0])
-        end_pos, end_or = State2Vec(self.pose)
+    # Assuming UWB ref is an np vector
+    def measurement(self, uwb_ref, uwb_range):
 
-        seg_len = norm(end_pos - start_pos) # circle radius
-        area = 2 * seg_len * np.pi
-
-        # From Gaussian distribution
-        for i in range(0, self.n_particles):
-            r = random.uniform(0, seg_len)
-            theta = random.uniform(0, 2*np.pi)
-
-            pos_x = self.pose.x + r * np.cos(theta)
-            pos_y = self.pose.y + r * np.sin(theta)
-            # Direction of our current pose + some variance based on segment curvature
-            ori = self.pose.o + random.uniform(-np.pi/2 , +np.pi/2) # For now we will just add +- 45deg to wherever the last pose is pointing
-            # TODO: THe range that we draw in uniform should scale with the distribution of angular changes along the segment 
-            self.particles[i] = State(pos_x, pos_y, ori)
-            self.weights[i] = 1/self.n_particles # Because we're creating them from uniform distribution
-
-        for part in self.particles:
-            dparticle(part, color='purple')
-
-        return None
-    
-    # def motion(self):
-    #     return None
-    
-    def measurement(self):
+        total_weight = 0
         # Only keep points that are within uwb_range+-10cm of ref
-        for particle in self.particles:
-            pos, o = State2Vec(particle)
-            dist_from_ref = norm(pos - self.ref)
-            inner = self.range - UNCERTAIN
-            outer = self.range + UNCERTAIN
+        for i in range(self.n_particles):
+            pos = np.array([self.particles[i].x, self.particles[i].y])
+            dist_from_ref = norm(pos - uwb_ref)
+            inner = uwb_range - UNCERTAIN
+            outer = uwb_range + UNCERTAIN
+            # Push all weights to 0 outside of the ranging
+            if not (dist_from_ref < outer and dist_from_ref > inner):
+                self.particles[i].weight = 0
+            else: total_weight += self.particles[i].weight
 
-            # if dist_from_ref < outer and dist_from_ref > inner:
+        # Now normalize s.t. all weights sum to 1
+        for i in range(self.n_particles):
+            self.particles[i].weight /= total_weight
 
-        return None
+        # Printing sum of weights for verification:
+        print(f" Sum of particle weights after normalization { np.sum([ p.weight for p in self.particles])}")
     
+    # Select the most likely particle as a weighted average of all remaining particles
+    def estimate(self):
+        states = [Particle2StateVec(p) for p in self.particles]
+        weights = [p.weight for p in self.particles]
+        return np.average(states, weights = weights, axis = 0)
+    
+
     def resample(self):
         return None
     
     def converged(self):
         # Check convergence condition here
         return True
-    
-    def get_estimated_segment(self):
-        return self.seg, self.pose
+
+
 
 def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # This algorithm will use a particle filter to estimate point location during each range.
