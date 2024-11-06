@@ -42,11 +42,16 @@ def dp(pos, label=None, color='000000'):
 def dparticle(particle, color='000000'):
     if DBG:
         dp((particle.x, particle.y), color)
-        d = 0.05 # length we want to show the direction vector at
+        d = 0.008 # length we want to show the direction vector at
         start, _ = State2Vec(particle)
         end = np.array( (particle.x + d*np.cos(particle.o), particle.y + d*np.sin(particle.o) )  )
         dv( start, end, color)
     else: return None
+
+def dparticle_weights(particles):
+    weights_colors = [p.weight for p in particles]
+    xs, ys = [p.x for p in particles] , [p.y for p in particles]
+    plt.scatter(xs, ys, c=weights_colors, cmap='Greens', s=10)
 
 def State2Vec(state): # Returns <x,y>, orientation
     return np.array((state.x, state.y)), state.o
@@ -98,8 +103,14 @@ class ParticleFilter1:
             particle.weight = weight
             self.particles.append(particle)
 
-        for part in self.particles:
-            dparticle(part, color='purple')
+        # for part in self.particles:
+        #     dparticle(part, color='purple')
+
+        # Draw particles with color representing weights
+        dparticle_weights(self.particles)
+        
+        # TODO: Generating particle weights wrong - probably from how I'm defining my 3D gaussian
+        print(f" Sum of particle weights after generating { np.sum([ p.weight for p in self.particles])}")
     
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -127,11 +138,14 @@ class ParticleFilter1:
                 self.particles[i].weight = 0
             else: total_weight += self.particles[i].weight
 
+        print(f" Sum of particle weights before normalization { np.sum([ p.weight for p in self.particles])}")
         # Now normalize s.t. all weights sum to 1
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
 
+        # dparticle_weights(self.particles)
         # Printing sum of weights for verification:
+        
         print(f" Sum of particle weights after normalization { np.sum([ p.weight for p in self.particles])}")
     
     # Select the most likely particle as a weighted average of all remaining particles
@@ -170,7 +184,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     estimated_poses = []
 
-    pf = ParticleFilter1(250)
+    pf = ParticleFilter1(1000)
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(1,dbg_view):
