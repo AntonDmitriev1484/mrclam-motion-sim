@@ -73,7 +73,7 @@ class ParticleFilter1:
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
-        r_dist = 1 # maximum distance of a particlef from start is 1meter in any direction
+        r_dist = 0.25 # maximum distance of a particlef from start is 1meter in any direction
         max_turn = np.pi / 2 # maximum turn is 45 degrees
 
         mean_state = np.array((start_pose.x, start_pose.y, start_pose.orientation))
@@ -85,7 +85,7 @@ class ParticleFilter1:
         covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
 
         # Create states at uniform, and weight them according to 3D Gaussian
-        for i in range(0, self.n_particles):
+        for i in range(self.n_particles):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
 
@@ -96,11 +96,10 @@ class ParticleFilter1:
             particle = Particle(pos_x,pos_y,ori,0)
             weight =  multivariate_normal.pdf(Particle2StateVec(particle), mean=mean_state, cov=covariance)
             particle.weight = weight
+            self.particles.append(particle)
 
         for part in self.particles:
             dparticle(part, color='purple')
-
-        return None
     
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -165,38 +164,41 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     # dbg_view = sim_time
     # dbg_view = 120*100 
-    dbg_view = 61 # range_T = 30
+    dbg_view = 31 # range_T = 30
 
     sum_delta_angle = 0
 
     estimated_poses = []
 
+    pf = ParticleFilter1(250)
+    pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(1,dbg_view):
-        # If its time for some client in our cluster to get slammed
         # if t % SLAM_T == 0:
         #     #TODO: Do I need to add to imu_segment here also?
         #     estimated_poses.append(all_gt_pose[robot_id][t])
         if t % range_T == 0:
-            # Use Particle filter here!
-
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
+            pf.measurement(ref_pos, norm(v_uwb))
+            estimate = pf.estimate()
+            estimated_poses.append(estimate)
+            # Now rotate the segment to meet this estimate
 
-            pf = ParticleFilter1(100, imu_segment, ref_pos, norm(v_uwb))
-            pf.generate()
 
-            new_seg = pf.get_estimated_segment()
-            # estimated_poses.append(pf.get_estimated_segment())
+            # new_seg = pf.get_estimated_segment()
+
             sum_delta_angle = 0
             # Reset imu segment TODO: Fix start point later, this is stacking tip-tail atop each other
-            imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
-            imu_segment[0] = State(new_seg[-1].x, new_seg[-1].y, new_seg[-1].o)
+            # imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
+            # imu_segment[0] = State(new_seg[-1].x, new_seg[-1].y, new_seg[-1].o)
 
         else:
             # Otherwise perform regular imu integration
             i = t%range_T
             vo = all_mes_vo[robot_id][t]
+            pf.update(vo) # Could we always just take the distribution mean from here to determine our motion?
+
             prev_pose = imu_segment[i-1]
 
             dy = vo.fv * dT * math.sin(prev_pose.o)         # sin = O/H
@@ -206,8 +208,10 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-    x, y = ([p.x for p in estimated_poses[:dbg_view]] , [p.y for p in estimated_poses[:dbg_view]])
-    plt.scatter(x, y, c='blue', s=1)
+
+
+    x, y = ([p[0] for p in estimated_poses[:dbg_view]] , [p[1] for p in estimated_poses[:dbg_view]])
+    plt.scatter(x, y, c='blue', s=10)
 
     x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_view]] , [p.y for p in all_gt_pose[robot_id][:dbg_view]])
     plt.scatter(x, y, c='green', s=1)
