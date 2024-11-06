@@ -71,46 +71,50 @@ class Particle:
 def Particle2StateVec(particle):
     return np.array((particle.x, particle.y, particle.o))
 
+
 class ParticleFilter1:
     def __init__(self, n_particles):
         self.n_particles = n_particles
-        self.particles = []
+        self.particles = [] # TODO: Maybe do a helper for getting weights out of particles and updating them.
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.25 # maximum distance of a particlef from start is 1meter in any direction
         max_turn = np.pi / 2 # maximum turn is 45 degrees
 
-        mean_state = np.array((start_pose.x, start_pose.y, start_pose.orientation))
-    
-        var_x = (r_dist/3)**2
-        var_y = var_x
-        var_o = (max_turn/3)**2
-        variances = np.array([var_x, var_y, var_o])
-        covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
+        states = np.zeros((self.n_particles, 3)) # nparticles rows, 3 cols
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(self.n_particles):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
 
-            pos_x = start_pose.x + r * np.cos(theta)
-            pos_y = start_pose.y + r * np.sin(theta)
-            ori = start_pose.orientation + random.uniform(-np.pi/2 , +np.pi/2)
+            states[i][0] = start_pose.x + r * np.cos(theta)
+            states[i][1] = start_pose.y + r * np.sin(theta)
+            states[i][2] = start_pose.orientation + random.uniform(-np.pi/2 , +np.pi/2)
 
-            particle = Particle(pos_x,pos_y,ori,0)
-            weight =  multivariate_normal.pdf(Particle2StateVec(particle), mean=mean_state, cov=covariance)
-            particle.weight = weight
+        # Way I was doing it originally may also have been fine
+        var_x = np.var(states[:,0], axis=0)
+        var_y = np.var(states[:,1], axis=0)
+        var_o = np.var(states[:,2], axis=0)
+        mean_state = np.mean(states, axis=0)
+        variances = np.array([var_x, var_y, var_o])
+        covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
+
+        weights = np.zeros(self.n_particles)
+        for i in range(self.n_particles):
+            particle = Particle(states[i,0],states[i,1],states[i,2],0)
             self.particles.append(particle)
+            weights[i] =  multivariate_normal.pdf(Particle2StateVec(particle), mean=mean_state, cov=covariance)
 
-        # for part in self.particles:
-        #     dparticle(part, color='purple')
+        # Distribution this gives us is correct, we just need to re-normalize everything to be out of 1
+        norm_weights = weights / np.sum(weights)
+        for i, w in enumerate(norm_weights):
+            self.particles[i].weight = w
 
         # Draw particles with color representing weights
-        dparticle_weights(self.particles)
+        # dparticle_weights(self.particles)
         
-        # TODO: Generating particle weights wrong - probably from how I'm defining my 3D gaussian
-        print(f" Sum of particle weights after generating { np.sum([ p.weight for p in self.particles])}")
     
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -142,18 +146,13 @@ class ParticleFilter1:
         # Now normalize s.t. all weights sum to 1
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
-
         # dparticle_weights(self.particles)
-        # Printing sum of weights for verification:
-        
-        print(f" Sum of particle weights after normalization { np.sum([ p.weight for p in self.particles])}")
     
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         states = [Particle2StateVec(p) for p in self.particles]
         weights = [p.weight for p in self.particles]
         return np.average(states, weights = weights, axis = 0)
-    
 
     def resample(self):
         return None
