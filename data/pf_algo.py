@@ -8,6 +8,7 @@ fig, ax = plt.subplots()
 ax.set_xlim(-0.5,3.5)
 ax.set_ylim(-3.5,0.5)
 ax.grid(True)
+UNCERTAIN = 0.01 # 10cm
 
 def rotate_segment(imu_segment):
     return None
@@ -52,6 +53,7 @@ def Vec2State(state):
     return State()
 
 class ParticleFilter1:
+
     def __init__(self, n_particles, imu_segment, uwb_ref, uwb_range):
         self.n_particles = n_particles
         self.seg = imu_segment
@@ -59,6 +61,7 @@ class ParticleFilter1:
         self.ref = uwb_ref
         self.range = uwb_range
         self.particles = [State(0,0,0) for i in range(0,n_particles)]
+        self.weights = [0 for i in range(0, n_particles)]
 
     def generate(self): # Why not drawing anything?
         # Generate points in a circle around pose with the length of the segment
@@ -70,9 +73,6 @@ class ParticleFilter1:
 
         # This should be calculated out of VO angular velocity not out of the integrated change!!!
         # TODO: How do we add uniform noise (within a range that scales with segment curvature) to the orientation of each particle
-        # sum_segment_curvature = np.sum([ abs(state.o) for state in self.imu_segment])
-        # mean_seg_curve = np.mean([ abs(state.o) for state in self.imu_segment])
-        # stdev_seg_curve = np.percentile([ abs(state.o) for state in self.imu_segment])
 
         # Evenly spread n_particles (x,y)s over the interior of this circle
         # Just draw from uniform distribution
@@ -86,8 +86,35 @@ class ParticleFilter1:
             ori = self.pose.o + random.uniform(-np.pi/2 , +np.pi/2) # For now we will just add +- 45deg to wherever the last pose is pointing
             # TODO: THe range that we draw in uniform should scale with the distribution of angular changes along the segment 
             self.particles[i] = State(pos_x, pos_y, ori)
+            self.weights[i] = 1/self.n_particles # Because we're creating them from uniform distribution
 
-        print(self.particles)
+        for part in self.particles:
+            dparticle(part, color='purple')
+
+        return None
+    
+    def generate_gaussian(self):
+        #    particles[:, 0] = mean[0] + (randn(N) * std[0])
+
+        # Generate points in a gaussian circle around pose with the length of the segment
+        start_pos, start_or = State2Vec(self.seg[0])
+        end_pos, end_or = State2Vec(self.pose)
+
+        seg_len = norm(end_pos - start_pos) # circle radius
+        area = 2 * seg_len * np.pi
+
+        # From Gaussian distribution
+        for i in range(0, self.n_particles):
+            r = random.uniform(0, seg_len)
+            theta = random.uniform(0, 2*np.pi)
+
+            pos_x = self.pose.x + r * np.cos(theta)
+            pos_y = self.pose.y + r * np.sin(theta)
+            # Direction of our current pose + some variance based on segment curvature
+            ori = self.pose.o + random.uniform(-np.pi/2 , +np.pi/2) # For now we will just add +- 45deg to wherever the last pose is pointing
+            # TODO: THe range that we draw in uniform should scale with the distribution of angular changes along the segment 
+            self.particles[i] = State(pos_x, pos_y, ori)
+            self.weights[i] = 1/self.n_particles # Because we're creating them from uniform distribution
 
         for part in self.particles:
             dparticle(part, color='purple')
@@ -98,6 +125,15 @@ class ParticleFilter1:
     #     return None
     
     def measurement(self):
+        # Only keep points that are within uwb_range+-10cm of ref
+        for particle in self.particles:
+            pos, o = State2Vec(particle)
+            dist_from_ref = norm(pos - self.ref)
+            inner = self.range - UNCERTAIN
+            outer = self.range + UNCERTAIN
+
+            # if dist_from_ref < outer and dist_from_ref > inner:
+
         return None
     
     def resample(self):
