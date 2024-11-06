@@ -71,11 +71,14 @@ class Particle:
 def Particle2StateVec(particle):
     return np.array((particle.x, particle.y, particle.o))
 
-
+# Reference: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
 class ParticleFilter1:
     def __init__(self, n_particles):
         self.n_particles = n_particles
         self.particles = [] # TODO: Maybe do a helper for getting weights out of particles and updating them.
+
+    def r_weights(self): # Return copy of weights in our particles array
+        return [p.weight for p in self.particles]
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
@@ -88,12 +91,10 @@ class ParticleFilter1:
         for i in range(self.n_particles):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
-
             states[i][0] = start_pose.x + r * np.cos(theta)
             states[i][1] = start_pose.y + r * np.sin(theta)
             states[i][2] = start_pose.orientation + random.uniform(-np.pi/2 , +np.pi/2)
 
-        # Way I was doing it originally may also have been fine
         var_x = np.var(states[:,0], axis=0)
         var_y = np.var(states[:,1], axis=0)
         var_o = np.var(states[:,2], axis=0)
@@ -142,6 +143,7 @@ class ParticleFilter1:
                 self.particles[i].weight = 0
             else: total_weight += self.particles[i].weight
 
+        # Particle weights are falling to zero, so we aren't re-sampling appropriately
         print(f" Sum of particle weights before normalization { np.sum([ p.weight for p in self.particles])}")
         # Now normalize s.t. all weights sum to 1
         for i in range(self.n_particles):
@@ -151,11 +153,30 @@ class ParticleFilter1:
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         states = [Particle2StateVec(p) for p in self.particles]
-        weights = [p.weight for p in self.particles]
+        weights = self.r_weights()
         return np.average(states, weights = weights, axis = 0)
+    
+    # TODO: Weights are dropping to 0, probably because my re-sampling scheme can't keep up with how 
+    # strict my measurement step.
+    def need_resample(self): # Calculate effective n to determine if we need to resample
+        weights = self.r_weights()
+        neff = 1. / np.sum(np.square(weights))
+        return neff < self.n_particles/2
 
     def resample(self):
-        return None
+        print("Re-sampling")
+        # Re-sample weights by duplicating high likelihood particles
+        candidates = []
+        for p in self.particles:
+            w = p.weight
+            if w > 0.4: # If we have a >0.4 probability of true we get re-sampled.
+                candidates.append(p)
+        j=0
+        for i in range(self.n_particles):
+            if self.particles[i]==0 and j < len(candidates):
+                self.particles[i] = candidates[j]
+                j+=1
+
     
     def converged(self):
         # Check convergence condition here
@@ -177,7 +198,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     # dbg_view = sim_time
     # dbg_view = 120*100 
-    dbg_view = 31 # range_T = 30
+    dbg_view = 300 # range_T = 30
 
     sum_delta_angle = 0
 
@@ -196,6 +217,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             pf.measurement(ref_pos, norm(v_uwb))
             estimate = pf.estimate()
             estimated_poses.append(estimate)
+
+            if pf.need_resample(): pf.resample()
             # Now rotate the segment to meet this estimate
 
 
