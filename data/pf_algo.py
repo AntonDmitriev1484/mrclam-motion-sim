@@ -74,6 +74,7 @@ def Particle2StateVec(particle):
 # Reference: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
 class ParticleFilter1:
     def __init__(self, n_particles):
+        self.pose = None
         self.n_particles = n_particles
         self.particles = [] # TODO: Maybe do a helper for getting weights out of particles and updating them.
 
@@ -83,7 +84,9 @@ class ParticleFilter1:
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.25 # maximum distance of a particlef from start is 1meter in any direction
-        max_turn = np.pi / 2 # maximum turn is 45 degrees
+        max_turn = np.pi / 4 
+        # maximum turn is 45 degrees - pass this parameter in based on segment history
+        # boost the number of particles when we have more turning?
 
         states = np.zeros((self.n_particles, 3)) # nparticles rows, 3 cols
 
@@ -143,39 +146,95 @@ class ParticleFilter1:
                 self.particles[i].weight = 0
             else: total_weight += self.particles[i].weight
 
+        # if total_weight == 0: self.generate(Pose(0,self.pose[0], self.pose[1], self.pose[2])) 
+        # Re-sample won't work here because it just dupiclates exisiting good particles
+
         # Particle weights are falling to zero, so we aren't re-sampling appropriately
         print(f" Sum of particle weights before normalization { np.sum([ p.weight for p in self.particles])}")
         # Now normalize s.t. all weights sum to 1
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
-        # dparticle_weights(self.particles)
+        # print(f" Sum of particle weights after normalization { np.sum([ p.weight for p in self.particles])}")
+        dparticle_weights(self.particles)
+        # plt.show()
+
     
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         states = [Particle2StateVec(p) for p in self.particles]
         weights = self.r_weights()
-        return np.average(states, weights = weights, axis = 0)
+        self.pose = np.average(states, weights = weights, axis = 0)
+        return self.pose
     
-    # TODO: Weights are dropping to 0, probably because my re-sampling scheme can't keep up with how 
-    # strict my measurement step.
     def need_resample(self): # Calculate effective n to determine if we need to resample
         weights = self.r_weights()
         neff = 1. / np.sum(np.square(weights))
+        print(f" N effective particles {neff}")
         return neff < self.n_particles/2
 
-    def resample(self):
-        print("Re-sampling")
-        # Re-sample weights by duplicating high likelihood particles
+    # def need_resample(self): # Calculate effective n to determine if we need to resample
+    #     zero_weights = 0
+    #     for p in self.particles:
+    #         if p.weight <= 0.0001 : zero_weights += 1
+    #     print(f" # 0 weights {zero_weights}")
+    #     return self.n_particles - zero_weights < 150 # Simply re-sample when we only have 50 weighted particles remaining
+    
+    def resample(self): # What happens if I force it to re-sample to 100 every time?
+        print("Re-sampling") # So re-sampling is improving the number of non-zero weights, but not enough
+        weights = self.r_weights()
+        N = len(self.particles)
+
+        cumulative_sum = np.cumsum(weights)
+        cumulative_sum[-1] = 1. # avoid round-off error
+        indexes = np.searchsorted(cumulative_sum, np.random.rand(N)) 
+        # Each random value maps to an index of a particle that we need to re-sample
+        # candidates = self.particles[indexes] # Accessing an array with an array of indices gives us a subset of the accessed array
+
+        # We don't re-sample all of the non-zero weights
+        # Ex. 32 non-zero weights, re-sampling gives us +25 
+
         candidates = []
-        for p in self.particles:
-            w = p.weight
-            if w > 0.4: # If we have a >0.4 probability of true we get re-sampled.
-                candidates.append(p)
-        j=0
         for i in range(self.n_particles):
-            if self.particles[i]==0 and j < len(candidates):
+            if i in indexes: candidates.append(self.particles[i])
+
+        j=0 # Now fill candidates in to the array in place of 0 weight particles
+        for i in range(self.n_particles):
+            if self.particles[i].weight<=0.00000001 and j < len(candidates):
                 self.particles[i] = candidates[j]
                 j+=1
+
+        # I see , we want to clone the state vectors that are most likely at this stage
+        # But at the next stage for re-sampling, we still want to give each state vector an equal chance
+
+        # So we converge by increasing the number of already estaeblished correct states
+        # rather than increasing the weight on a low number of correct states
+
+        for i in range(self.n_particles):
+            self.particles[i].weight = 1./N
+
+        zero_weights = 0
+        for p in self.particles:
+            if p.weight <= 0.0001 : zero_weights += 1
+        print(f" After resampling # 0 weights {zero_weights} ")
+        # # resample according to indexes
+        # self.particles[:] = self.particles[indexes]
+        # weights.fill(1.0 / N) # Them re-sampling from uniform distribution
+
+    # def resample(self):
+    #     print("Re-sampling")
+    #     # Re-sample weights by duplicating high likelihood particles
+    #     candidates = []
+    #     for p in self.particles:
+    #         w = p.weight
+    #         if w > 0.00000001: # If we have a >0.4 probability of true we get re-sampled.
+    #             candidates.append(p)
+    #     # Re-sampling candidates)
+    #     print(candidates)
+    #     j=0
+    #     for i in range(self.n_particles):
+    #         if self.particles[i]==0 and j < len(candidates):
+    #             self.particles[i] = candidates[j]
+    #             j+=1
 
     
     def converged(self):
@@ -198,6 +257,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
     # dbg_view = sim_time
     # dbg_view = 120*100 
+    # dbg_view = 100*range_T
     dbg_view = 300 # range_T = 30
 
     sum_delta_angle = 0
@@ -212,13 +272,15 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
         #     #TODO: Do I need to add to imu_segment here also?
         #     estimated_poses.append(all_gt_pose[robot_id][t])
         if t % range_T == 0:
+            print(f" Range # {t/range_T}")
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
             pf.measurement(ref_pos, norm(v_uwb))
             estimate = pf.estimate()
             estimated_poses.append(estimate)
 
-            if pf.need_resample(): pf.resample()
+            if pf.need_resample(): 
+                pf.resample()
             # Now rotate the segment to meet this estimate
 
 
