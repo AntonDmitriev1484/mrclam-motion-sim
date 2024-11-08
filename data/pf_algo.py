@@ -51,7 +51,7 @@ def dparticle(particle, color='000000'):
 def dparticle_weights(particles):
     weights_colors = [p.weight for p in particles]
     xs, ys = [p.x for p in particles] , [p.y for p in particles]
-    plt.scatter(xs, ys, c=weights_colors, cmap='Greens', s=10)
+    plt.scatter(xs, ys, c=weights_colors, cmap='plasma', s=10)
 
 def State2Vec(state): # Returns <x,y>, orientation
     return np.array((state.x, state.y)), state.o
@@ -84,7 +84,7 @@ class ParticleFilter1:
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.25 # maximum distance of a particlef from start is 1meter in any direction
-        max_turn = np.pi / 4 
+        max_turn = np.pi / 8
         # maximum turn is 45 degrees - pass this parameter in based on segment history
         # boost the number of particles when we have more turning?
 
@@ -118,7 +118,9 @@ class ParticleFilter1:
             self.particles[i].weight = w
 
         # Draw particles with color representing weights
-        dparticle_weights(self.particles)
+        # for p in self.particles:
+        #     dparticle(p)
+        # dparticle_weights(self.particles)
         
     
     def update(self, vo):
@@ -155,8 +157,7 @@ class ParticleFilter1:
         # Now normalize s.t. all weights sum to 1
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
-        # print(f" Sum of particle weights after normalization { np.sum([ p.weight for p in self.particles])}")
-        dparticle_weights(self.particles)
+        # dparticle_weights(self.particles)
         # plt.show()
 
     
@@ -173,9 +174,15 @@ class ParticleFilter1:
         print(f" N effective particles {neff}")
         return neff < self.n_particles/2
 
-    def resample(self): # What happens if I force it to re-sample to 100 every time?
-        print("Re-sampling") # So re-sampling is improving the number of non-zero weights, but not enough
+    def resample(self):
+        print("Re-sampling")
         weights = self.r_weights()
+
+        zero_weights = 0
+        for p in self.particles:
+            if p.weight <= 0.0001 : zero_weights += 1
+        print(f" Before resampling # 0 weights {zero_weights} ")
+
         N = len(self.particles)
 
         cumulative_sum = np.cumsum(weights)
@@ -191,25 +198,29 @@ class ParticleFilter1:
         for i in range(self.n_particles):
             if i in indexes: candidates.append(self.particles[i])
 
-        j=0 # Now fill candidates in to the array in place of 0 weight particles
-        for i in range(self.n_particles):
-            if self.particles[i].weight<=0.00000001 and j < len(candidates):
-                self.particles[i] = candidates[j]
-                j+=1
-
+        for c_weight, index in zip(candidates, indexes):
+            t = random.randint(0, self.n_particles)
+            while t in indexes:
+                t = random.randint(0, self.n_particles)
+            # Pick a non-candidate index
+            self.particles[i].weight = c_weight
+            
+        # Rather than filling in from the start, what if we randomly selected points? Would that get rid of the giant cut?
+        # Yes! That actually fixed it.
+ 
         # I see , we want to clone the state vectors that are most likely at this stage
         # But at the next stage for re-sampling, we still want to give each state vector an equal chance
-
-        # So we converge by increasing the number of already estaeblished correct states
+        # So we converge by increasing the number of already established correct states
         # rather than increasing the weight on a low number of correct states
 
         for i in range(self.n_particles):
             self.particles[i].weight = 1./N
 
-        zero_weights = 0
-        for p in self.particles:
-            if p.weight <= 0.0001 : zero_weights += 1
-        print(f" After resampling # 0 weights {zero_weights} ")
+        # zero_weights = 0
+        # for p in self.particles:
+        #     if p.weight <= 0.0001 : zero_weights += 1
+        # print(f" After resampling # 0 weights {zero_weights} ")
+
         # # resample according to indexes
         # self.particles[:] = self.particles[indexes]
         # weights.fill(1.0 / N) # Them re-sampling from uniform distribution
@@ -234,15 +245,15 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     imu_segment[0] = State(start_pose.x, start_pose.y, start_pose.orientation)
 
     # dbg_view = sim_time
-    # dbg_view = 120*100 
+    dbg_view = 120*100 
     # dbg_view = 100*range_T
-    dbg_view = 300 # range_T = 30
+    # dbg_view = 300 # range_T = 30
 
     sum_delta_angle = 0
 
     estimated_poses = []
 
-    pf = ParticleFilter1(1000)
+    pf = ParticleFilter1(2000)
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(1,dbg_view):
