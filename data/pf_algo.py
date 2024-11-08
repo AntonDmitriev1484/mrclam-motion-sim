@@ -36,7 +36,7 @@ def dv(start, end, label=None, color='000000'):
     if DBG: plt.arrow(start[0], start[1], end[0], end[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
 
 def dp(pos, label=None, color='000000'):
-    if DBG: return plt.scatter(pos[0], pos[1], color=color, label=label,  s=0.1)
+    if DBG: return plt.scatter(pos[0], pos[1], color=color, label=label,  s=10)
     else: return None
 
 def dparticle(particle, color='000000'):
@@ -83,11 +83,8 @@ class ParticleFilter1:
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
-        r_dist = 0.25 # maximum distance of a particlef from start is 1meter in any direction
+        r_dist = 0.25 # maximum distance of a particlef from start is 1/4meter in any direction
         max_turn = np.pi / 8
-        # maximum turn is 45 degrees - pass this parameter in based on segment history
-        # boost the number of particles when we have more turning?
-
         states = np.zeros((self.n_particles, 3)) # nparticles rows, 3 cols
 
         # Create states at uniform, and weight them according to 3D Gaussian
@@ -97,7 +94,6 @@ class ParticleFilter1:
             states[i][0] = start_pose.x + r * np.cos(theta)
             states[i][1] = start_pose.y + r * np.sin(theta)
             states[i][2] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
-
 
         var_x = np.var(states[:,0], axis=0)
         var_y = np.var(states[:,1], axis=0)
@@ -135,9 +131,8 @@ class ParticleFilter1:
             self.particles[i].o += do
 
     # Assuming UWB ref is an np vector
-    def measurement(self, uwb_ref, uwb_range):
+    def measurement(self, uwb_ref, uwb_range, hint_pos):
 
-        total_weight = 0
         # Only keep points that are within uwb_range+-10cm of ref
         for i in range(self.n_particles):
             pos = np.array([self.particles[i].x, self.particles[i].y])
@@ -147,16 +142,40 @@ class ParticleFilter1:
             # Push all weights to 0 outside of the ranging
             if not (dist_from_ref < outer and dist_from_ref > inner):
                 self.particles[i].weight = 0
-            else: total_weight += self.particles[i].weight
 
-        # if total_weight == 0: self.generate(Pose(0,self.pose[0], self.pose[1], self.pose[2])) 
-        # Re-sample won't work here because it just dupiclates exisiting good particles
+        # Weight particles higher around our trig approximation point
+        # Double all of the weights that fall between our trig approx estimate and our particle filter estimate
+        p = self.estimate()
+        pf_estimate = np.array((p[0], p[1]))
 
-        # Particle weights are falling to zero, so we aren't re-sampling appropriately
-        print(f" Sum of particle weights before normalization { np.sum([ p.weight for p in self.particles])}")
+        v_radius = pf_estimate - hint_pos
+        dp(pf_estimate, color='purple') # Why initial estimate so close to VO?
+
+        dv(hint_pos, hint_pos + v_radius, color = 'green')
+
+        ta_radius = norm(pf_estimate - hint_pos)
+        for i in range(self.n_particles):
+            p_pos = np.array((self.particles[i].x, self.particles[i].y))
+            in_circle_radius = norm(p_pos - hint_pos) < ta_radius
+            in_circle_half = dot( p_pos-hint_pos , hint_pos) > 0
+            if  in_circle_half and in_circle_radius:
+                self.particles[i].weight*=4
+
+        # Only keep points that are within uwb_range+-10cm of ref
+        for i in range(self.n_particles):
+            pos = np.array([self.particles[i].x, self.particles[i].y])
+            dist_from_ref = norm(pos - uwb_ref)
+            inner = uwb_range - UNCERTAIN
+            outer = uwb_range + UNCERTAIN
+            # Push all weights to 0 outside of the ranging
+            if not (dist_from_ref < outer and dist_from_ref > inner):
+                self.particles[i].weight = 0
+
         # Now normalize s.t. all weights sum to 1
+        total_weight = np.sum(self.r_weights())
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
+
         # dparticle_weights(self.particles)
         # plt.show()
 
@@ -171,28 +190,23 @@ class ParticleFilter1:
     def need_resample(self): # Calculate effective n to determine if we need to resample
         weights = self.r_weights()
         neff = 1. / np.sum(np.square(weights))
-        print(f" N effective particles {neff}")
+        # print(f" N effective particles {neff}")
         return neff < self.n_particles/2
 
     def resample(self):
-        print("Re-sampling")
+        # print("Re-sampling")
         weights = self.r_weights()
 
         zero_weights = 0
         for p in self.particles:
             if p.weight <= 0.0001 : zero_weights += 1
-        print(f" Before resampling # 0 weights {zero_weights} ")
+        # print(f" Before resampling # 0 weights {zero_weights} ")
 
         N = len(self.particles)
 
         cumulative_sum = np.cumsum(weights)
         cumulative_sum[-1] = 1. # avoid round-off error
         indexes = np.searchsorted(cumulative_sum, np.random.rand(N)) 
-        # Each random value maps to an index of a particle that we need to re-sample
-        # candidates = self.particles[indexes] # Accessing an array with an array of indices gives us a subset of the accessed array
-
-        # We don't re-sample all of the non-zero weights
-        # Ex. 32 non-zero weights, re-sampling gives us +25 
 
         candidates = []
         for i in range(self.n_particles):
@@ -205,30 +219,8 @@ class ParticleFilter1:
             # Pick a non-candidate index
             self.particles[i].weight = c_weight
             
-        # Rather than filling in from the start, what if we randomly selected points? Would that get rid of the giant cut?
-        # Yes! That actually fixed it.
- 
-        # I see , we want to clone the state vectors that are most likely at this stage
-        # But at the next stage for re-sampling, we still want to give each state vector an equal chance
-        # So we converge by increasing the number of already established correct states
-        # rather than increasing the weight on a low number of correct states
-
         for i in range(self.n_particles):
             self.particles[i].weight = 1./N
-
-        # zero_weights = 0
-        # for p in self.particles:
-        #     if p.weight <= 0.0001 : zero_weights += 1
-        # print(f" After resampling # 0 weights {zero_weights} ")
-
-        # # resample according to indexes
-        # self.particles[:] = self.particles[indexes]
-        # weights.fill(1.0 / N) # Them re-sampling from uniform distribution
-
-    
-    def converged(self):
-        # Check convergence condition here
-        return True
 
 
 
@@ -264,12 +256,13 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             print(f" Range # {t/range_T}")
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
-            pf.measurement(ref_pos, norm(v_uwb))
+
+
+            pf.measurement(ref_pos, norm(v_uwb), true_pos)
             estimate = pf.estimate()
             estimated_poses.append(estimate)
 
-            if pf.need_resample(): 
-                pf.resample()
+            if pf.need_resample(): pf.resample()
             # Now rotate the segment to meet this estimate
 
 
