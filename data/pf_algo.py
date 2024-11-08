@@ -131,7 +131,7 @@ class ParticleFilter1:
             self.particles[i].o += do
 
     # Assuming UWB ref is an np vector
-    def measurement(self, uwb_ref, uwb_range, hint_pos):
+    def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
 
         # Only keep points that are within uwb_range+-10cm of ref
         for i in range(self.n_particles):
@@ -147,39 +147,25 @@ class ParticleFilter1:
         # Double all of the weights that fall between our trig approx estimate and our particle filter estimate
         p = self.estimate()
         pf_estimate = np.array((p[0], p[1]))
-
         v_radius = pf_estimate - hint_pos
         dp(pf_estimate, color='purple') # Why initial estimate so close to VO?
-
         dv(hint_pos, hint_pos + v_radius, color = 'green')
 
+        # TURN_CEIL = 0.10745999999999996
+        # ta_radius = norm(pf_estimate - hint_pos) *  (seg_curve / TURN_CEIL)**5
         ta_radius = norm(pf_estimate - hint_pos)
-        for i in range(self.n_particles):
-            p_pos = np.array((self.particles[i].x, self.particles[i].y))
-            in_circle_radius = norm(p_pos - hint_pos) < ta_radius
-            in_circle_half = dot( p_pos-hint_pos , hint_pos) > 0
-            if  in_circle_half and in_circle_radius:
-                self.particles[i].weight*=4
+        # Maybe we're creating the circle correctly, but we're just multiplying a bunch of 0s
 
-        # Only keep points that are within uwb_range+-10cm of ref
-        for i in range(self.n_particles):
-            pos = np.array([self.particles[i].x, self.particles[i].y])
-            dist_from_ref = norm(pos - uwb_ref)
-            inner = uwb_range - UNCERTAIN
-            outer = uwb_range + UNCERTAIN
-            # Push all weights to 0 outside of the ranging
-            if not (dist_from_ref < outer and dist_from_ref > inner):
-                self.particles[i].weight = 0
-
+        dv(hint_pos, hint_pos + v_radius, color = 'green')
         # Now normalize s.t. all weights sum to 1
         total_weight = np.sum(self.r_weights())
         for i in range(self.n_particles):
             self.particles[i].weight /= total_weight
 
-        # dparticle_weights(self.particles)
-        # plt.show()
+    def show_particles(self):
+        dparticle_weights(self.particles)
+        plt.show()
 
-    
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         states = [Particle2StateVec(p) for p in self.particles]
@@ -191,10 +177,12 @@ class ParticleFilter1:
         weights = self.r_weights()
         neff = 1. / np.sum(np.square(weights))
         # print(f" N effective particles {neff}")
-        return neff < self.n_particles/2
+        # threshold = self.n_particles/2
+        threshold = 50
+        return neff < threshold
 
     def resample(self):
-        # print("Re-sampling")
+        print("Re-sampling")
         weights = self.r_weights()
 
         zero_weights = 0
@@ -236,8 +224,12 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
     imu_segment[0] = State(start_pose.x, start_pose.y, start_pose.orientation)
 
+    # Segment from 1 to 1.5 minutes has problems
+    dbg_start = 40 * 100
+    dbg_end = 45 * 100
+
     # dbg_view = sim_time
-    dbg_view = 120*100 
+    # dbg_view = 120*100 
     # dbg_view = 100*range_T
     # dbg_view = 300 # range_T = 30
 
@@ -248,7 +240,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     pf = ParticleFilter1(2000)
     pf.generate(all_gt_pose[robot_id][0])
 
-    for t in range(1,dbg_view):
+    for t in range(0,dbg_end):
         # if t % SLAM_T == 0:
         #     #TODO: Do I need to add to imu_segment here also?
         #     estimated_poses.append(all_gt_pose[robot_id][t])
@@ -257,8 +249,19 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
+            if ( dbg_start < t) and (t < dbg_end):
+                print(f"Showing particles before measure")
+                pf.show_particles()
+            pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
 
-            pf.measurement(ref_pos, norm(v_uwb), true_pos)
+            print(f" s { dbg_start} , t {t} , e {dbg_end}")
+            if ( dbg_start < t) and (t < dbg_end): 
+                print(f"Showing particles after measure")
+                pf.show_particles()
+                # dp(true_pos, color='green')
+                # imu_pos = mes_pose[robot_id][t]
+                # dp(imu_pos, color = 'red')
+
             estimate = pf.estimate()
             estimated_poses.append(estimate)
 
@@ -290,15 +293,16 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
 
 
-    x, y = ([p[0] for p in estimated_poses[:dbg_view]] , [p[1] for p in estimated_poses[:dbg_view]])
+    # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
+    x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
     plt.scatter(x, y, c='blue', s=10)
 
-    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_view]] , [p.y for p in all_gt_pose[robot_id][:dbg_view]])
+    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
     plt.scatter(x, y, c='green', s=1)
 
     # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
     # plt.scatter(x, y, c='green', s=1)
-    x, y = ([p.x for p in mes_pose[robot_id][:dbg_view]] , [p.y for p in mes_pose[robot_id][:dbg_view]])
+    x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
     plt.scatter(x, y, c='red', s=1)
 
     plt.show()
