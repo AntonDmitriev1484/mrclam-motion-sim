@@ -96,7 +96,8 @@ class ParticleFilter1:
             theta = random.uniform(0, 2*np.pi)
             states[i][0] = start_pose.x + r * np.cos(theta)
             states[i][1] = start_pose.y + r * np.sin(theta)
-            states[i][2] = start_pose.orientation + random.uniform(-np.pi/2 , +np.pi/2)
+            states[i][2] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
+
 
         var_x = np.var(states[:,0], axis=0)
         var_y = np.var(states[:,1], axis=0)
@@ -117,7 +118,7 @@ class ParticleFilter1:
             self.particles[i].weight = w
 
         # Draw particles with color representing weights
-        # dparticle_weights(self.particles)
+        dparticle_weights(self.particles)
         
     
     def update(self, vo):
@@ -172,13 +173,6 @@ class ParticleFilter1:
         print(f" N effective particles {neff}")
         return neff < self.n_particles/2
 
-    # def need_resample(self): # Calculate effective n to determine if we need to resample
-    #     zero_weights = 0
-    #     for p in self.particles:
-    #         if p.weight <= 0.0001 : zero_weights += 1
-    #     print(f" # 0 weights {zero_weights}")
-    #     return self.n_particles - zero_weights < 150 # Simply re-sample when we only have 50 weighted particles remaining
-    
     def resample(self): # What happens if I force it to re-sample to 100 every time?
         print("Re-sampling") # So re-sampling is improving the number of non-zero weights, but not enough
         weights = self.r_weights()
@@ -219,22 +213,6 @@ class ParticleFilter1:
         # # resample according to indexes
         # self.particles[:] = self.particles[indexes]
         # weights.fill(1.0 / N) # Them re-sampling from uniform distribution
-
-    # def resample(self):
-    #     print("Re-sampling")
-    #     # Re-sample weights by duplicating high likelihood particles
-    #     candidates = []
-    #     for p in self.particles:
-    #         w = p.weight
-    #         if w > 0.00000001: # If we have a >0.4 probability of true we get re-sampled.
-    #             candidates.append(p)
-    #     # Re-sampling candidates)
-    #     print(candidates)
-    #     j=0
-    #     for i in range(self.n_particles):
-    #         if self.particles[i]==0 and j < len(candidates):
-    #             self.particles[i] = candidates[j]
-    #             j+=1
 
     
     def converged(self):
