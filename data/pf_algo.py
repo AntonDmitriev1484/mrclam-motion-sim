@@ -74,15 +74,18 @@ class Particle:
 def Particle2StateVec(particle):
     return np.array((particle.x, particle.y, particle.o))
 
+# Constants for accessing arrays
+X, Y, O, W = (0,1,2,3)
+
 # Reference: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
 class ParticleFilter1:
     def __init__(self, n_particles):
         self.pose = None
-        self.n_particles = n_particles
-        self.particles = [] # TODO: Maybe do a helper for getting weights out of particles and updating them.
+        self.N = n_particles
+        self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
         
-        self.fig, self.ax = plt.sublplots()
-        self.ani = FuncAnimation(self.fig, self.ani_update, interval=5, blit=True)
+        # self.fig, self.ax = plt.sublplots()
+        # self.ani = FuncAnimation(self.fig, self.ani_update, interval=5, blit=True)
 
     # # Run after update and measurement step, 
     # def ani_update(self, i):
@@ -93,37 +96,38 @@ class ParticleFilter1:
     def r_weights(self): # Return copy of weights in our particles array
         return [p.weight for p in self.particles]
 
+
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.25 # maximum distance of a particlef from start is 1/4meter in any direction
         max_turn = np.pi / 10
-        states = np.zeros((self.n_particles, 3)) # nparticles rows, 3 cols
 
         # Create states at uniform, and weight them according to 3D Gaussian
-        for i in range(self.n_particles):
+        for i in range(self.N):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
-            states[i][0] = start_pose.x + r * np.cos(theta)
-            states[i][1] = start_pose.y + r * np.sin(theta)
-            states[i][2] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
+            self.particles[i][X] = start_pose.x + r * np.cos(theta)
+            self.particles[i][Y] = start_pose.y + r * np.sin(theta)
+            self.particles[i][O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
 
-        var_x = np.var(states[:,0], axis=0)
-        var_y = np.var(states[:,1], axis=0)
-        var_o = np.var(states[:,2], axis=0)
-        mean_state = np.mean(states, axis=0)
+        var_x = np.var( self.particles[:,X], axis=0)
+        var_y = np.var( self.particles[:,Y], axis=0)
+        var_o = np.var( self.particles[:,O], axis=0)
+
+        # So for NUMPY, you actually have to use the [ , ] in all scenarios for proper slicing
+        print(self.particles.shape)
+        print(self.particles[:].shape)
+        print(self.particles[:,:W].shape)
+
+        mean_state = np.mean(self.particles[:,:W], axis=0)
         variances = np.array([var_x, var_y, var_o])
         covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
 
-        weights = np.zeros(self.n_particles)
-        for i in range(self.n_particles):
-            particle = Particle(states[i,0],states[i,1],states[i,2],0)
-            self.particles.append(particle)
-            weights[i] =  multivariate_normal.pdf(Particle2StateVec(particle), mean=mean_state, cov=covariance)
+        for i in range(self.N):
+            self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,:W], mean=mean_state, cov=covariance)
 
         # Distribution this gives us is correct, we just need to re-normalize everything to be out of 1
-        norm_weights = weights / np.sum(weights)
-        for i, w in enumerate(norm_weights):
-            self.particles[i].weight = w
+        self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
         # Draw particles with color representing weights
         # for p in self.particles:
@@ -133,30 +137,29 @@ class ParticleFilter1:
     def update(self, vo):
         # Update each particle according to visual odometry measurement
         dT = 1/T
-        for i in range(self.n_particles):
-            dy = vo.fv * dT * math.sin(self.particles[i].o)         # sin = O/H
-            dx = vo.fv * dT * math.cos(self.particles[i].o)        # cos = A/H
+        for i in range(self.N):
+            dy = vo.fv * dT * math.sin(self.particles[i, O])         # sin = O/H
+            dx = vo.fv * dT * math.cos(self.particles[i, O])        # cos = A/H
             do = (vo.av) * dT
-            self.particles[i].x += dx
-            self.particles[i].y += dy
-            self.particles[i].o += do
+            self.particles[i, X] += dx
+            self.particles[i, Y] += dy
+            self.particles[i, O] += do
 
     # Assuming UWB ref is an np vector
     def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
 
         # Only keep points that are within uwb_range+-10cm of ref
-        for i in range(self.n_particles):
-            pos = np.array([self.particles[i].x, self.particles[i].y])
+        for i in range(self.N):
+            pos = np.array([self.particles[i, X], self.particles[i, Y]])
             dist_from_ref = norm(pos - uwb_ref)
             inner = uwb_range - UNCERTAIN
             outer = uwb_range + UNCERTAIN
             # Push all weights to 0 outside of the ranging
             if not (dist_from_ref < outer and dist_from_ref > inner):
-                self.particles[i].weight = 0
+                self.particles[i, W] = 0
         # Now normalize s.t. all weights sum to 1
-        total_weight = np.sum(self.r_weights())
-        for i in range(self.n_particles):
-            self.particles[i].weight /= total_weight
+        print(f" sum {np.sum(self.particles[:,W])} ")
+        self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def show_particles(self):
         dparticle_weights(self.particles)
@@ -164,47 +167,44 @@ class ParticleFilter1:
 
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
-        states = [Particle2StateVec(p) for p in self.particles]
-        weights = self.r_weights()
-        self.pose = np.average(states, weights = weights, axis = 0)
+        self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
+        print(self.pose)
         return self.pose
     
     def need_resample(self): # Calculate effective n to determine if we need to resample
-        weights = self.r_weights()
+        weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
         # print(f" N effective particles {neff}")
-        # threshold = self.n_particles/2
+        # threshold = self.N/2
         threshold = 50
         return neff < threshold
 
     def resample(self):
         print("Re-sampling")
-        weights = self.r_weights()
+        weights = self.particles[:,W]
 
         zero_weights = 0
         for p in self.particles:
-            if p.weight <= 0.0001 : zero_weights += 1
+            if p[W] <= 0.0001 : zero_weights += 1
         # print(f" Before resampling # 0 weights {zero_weights} ")
-
-        N = len(self.particles)
 
         cumulative_sum = np.cumsum(weights)
         cumulative_sum[-1] = 1. # avoid round-off error
-        indexes = np.searchsorted(cumulative_sum, np.random.rand(N)) 
+        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N)) 
 
         candidates = []
-        for i in range(self.n_particles):
-            if i in indexes: candidates.append(self.particles[i])
+        for i in range(self.N):
+            if i in indexes: candidates.append(self.particles[i]) # Adding a whole [x,y,o,w]
 
-        for c_weight, index in zip(candidates, indexes):
-            t = random.randint(0, self.n_particles)
+        for particle in candidates:
+            t = random.randint(0, self.N)
             while t in indexes:
-                t = random.randint(0, self.n_particles)
+                t = random.randint(0, self.N)
             # Pick a non-candidate index
-            self.particles[i].weight = c_weight
+            self.particles[i] = particle
             
-        for i in range(self.n_particles):
-            self.particles[i].weight = 1./N
+        for i in range(self.N):
+            self.particles[i, W] = 1./self.N
 
 
 
@@ -276,33 +276,33 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
 
 
-    camera = Camera(plt.figure())
-    for ps in particles_over_time[:100]:
-        dparticle_weights(ps)
-        camera.snap()
-        # plt.clear()
+    # camera = Camera(plt.figure())
+    # for ps in particles_over_time[:100]:
+    #     dparticle_weights(ps)
+    #     camera.snap()
+    #     # plt.clear()
 
-    anim = camera.animate(blit=True)
-
-
-
-    a = AnimatedScatter()
-    plt.show()
+    # anim = camera.animate(blit=True)
 
 
-    # # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
-    # x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
-    # plt.scatter(x, y, c='blue', s=10)
 
-    # x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
-    # plt.scatter(x, y, c='green', s=1)
-
-    # # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
-    # # plt.scatter(x, y, c='green', s=1)
-    # x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
-    # plt.scatter(x, y, c='red', s=1)
-
+    # a = AnimatedScatter()
     # plt.show()
+
+
+    # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
+    x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
+    plt.scatter(x, y, c='blue', s=10)
+
+    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
+    plt.scatter(x, y, c='green', s=1)
+
+    # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
+    # plt.scatter(x, y, c='green', s=1)
+    x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
+    plt.scatter(x, y, c='red', s=1)
+
+    plt.show()
 
     return estimated_poses
 
