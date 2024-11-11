@@ -84,7 +84,7 @@ class ParticleFilter1:
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.25 # maximum distance of a particlef from start is 1/4meter in any direction
-        max_turn = np.pi / 8
+        max_turn = np.pi / 10
         states = np.zeros((self.n_particles, 3)) # nparticles rows, 3 cols
 
         # Create states at uniform, and weight them according to 3D Gaussian
