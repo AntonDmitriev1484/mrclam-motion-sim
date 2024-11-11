@@ -4,6 +4,9 @@ import random
 from load_data import * 
 from dataclasses import dataclass
 from scipy.stats import multivariate_normal
+from matplotlib.animation import FuncAnimation
+from celluloid import Camera
+from AnimatedScatter import AnimatedScatter
 
 T=100
 fig, ax = plt.subplots()
@@ -77,6 +80,15 @@ class ParticleFilter1:
         self.pose = None
         self.n_particles = n_particles
         self.particles = [] # TODO: Maybe do a helper for getting weights out of particles and updating them.
+        
+        self.fig, self.ax = plt.sublplots()
+        self.ani = FuncAnimation(self.fig, self.ani_update, interval=5, blit=True)
+
+    # # Run after update and measurement step, 
+    # def ani_update(self, i):
+    #     self.scat.set_offsets()
+
+    #     return self.scat,
 
     def r_weights(self): # Return copy of weights in our particles array
         return [p.weight for p in self.particles]
@@ -118,7 +130,6 @@ class ParticleFilter1:
         #     dparticle(p)
         # dparticle_weights(self.particles)
         
-    
     def update(self, vo):
         # Update each particle according to visual odometry measurement
         dT = 1/T
@@ -142,20 +153,6 @@ class ParticleFilter1:
             # Push all weights to 0 outside of the ranging
             if not (dist_from_ref < outer and dist_from_ref > inner):
                 self.particles[i].weight = 0
-
-        # Weight particles higher around our trig approximation point
-        # Double all of the weights that fall between our trig approx estimate and our particle filter estimate
-        p = self.estimate()
-        pf_estimate = np.array((p[0], p[1]))
-        v_radius = pf_estimate - hint_pos
-        # dp(pf_estimate, color='purple') # Why initial estimate so close to VO?
-        # dv(hint_pos, hint_pos + v_radius, color = 'green')
-
-        # TURN_CEIL = 0.10745999999999996
-        # ta_radius = norm(pf_estimate - hint_pos) *  (seg_curve / TURN_CEIL)**5
-        ta_radius = norm(pf_estimate - hint_pos)
-        # Maybe we're creating the circle correctly, but we're just multiplying a bunch of 0s
-
         # Now normalize s.t. all weights sum to 1
         total_weight = np.sum(self.r_weights())
         for i in range(self.n_particles):
@@ -226,7 +223,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_end = 300 * 100
+    # dbg_end = 300 * 100
+    dbg_end = 120 * 100
 
     # dbg_view = sim_time
     # dbg_view = 120*100 
@@ -236,6 +234,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     sum_delta_angle = 0
 
     estimated_poses = []
+    particles_over_time = []
 
     pf = ParticleFilter1(2000)
     pf.generate(all_gt_pose[robot_id][0])
@@ -249,17 +248,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
-            # if ( dbg_start < t) and (t < dbg_end):
-            #     print(f"Showing particles before measure")
-            #     pf.show_particles()
             pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
-
-            # if ( dbg_start < t) and (t < dbg_end): 
-            #     print(f"Showing particles after measure")
-            #     pf.show_particles()
-            #     # dp(true_pos, color='green')
-            #     # imu_pos = mes_pose[robot_id][t]
-            #     # dp(imu_pos, color = 'red')
 
             estimate = pf.estimate()
             estimated_poses.append(estimate)
@@ -267,14 +256,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             if pf.need_resample(): pf.resample()
             # Now rotate the segment to meet this estimate
 
-
-            # new_seg = pf.get_estimated_segment()
-
             sum_delta_angle = 0
-            # Reset imu segment TODO: Fix start point later, this is stacking tip-tail atop each other
-            # imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
-            # imu_segment[0] = State(new_seg[-1].x, new_seg[-1].y, new_seg[-1].o)
-
         else:
             # Otherwise perform regular imu integration
             i = t%range_T
@@ -290,19 +272,37 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-    # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
-    x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
-    plt.scatter(x, y, c='blue', s=10)
+        particles_over_time.append(pf.particles)
 
-    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
-    plt.scatter(x, y, c='green', s=1)
 
-    # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
-    # plt.scatter(x, y, c='green', s=1)
-    x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
-    plt.scatter(x, y, c='red', s=1)
 
+    camera = Camera(plt.figure())
+    for ps in particles_over_time[:100]:
+        dparticle_weights(ps)
+        camera.snap()
+        # plt.clear()
+
+    anim = camera.animate(blit=True)
+
+
+
+    a = AnimatedScatter()
     plt.show()
+
+
+    # # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
+    # x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
+    # plt.scatter(x, y, c='blue', s=10)
+
+    # x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
+    # plt.scatter(x, y, c='green', s=1)
+
+    # # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
+    # # plt.scatter(x, y, c='green', s=1)
+    # x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
+    # plt.scatter(x, y, c='red', s=1)
+
+    # plt.show()
 
     return estimated_poses
 
