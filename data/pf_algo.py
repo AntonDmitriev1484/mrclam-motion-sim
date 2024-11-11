@@ -77,6 +77,8 @@ class ParticleFilter1:
         self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
         
         self.fig, self.ax = plt.subplots()
+        self.scat = self.ax.scatter(self.particles[:,X], self.particles[:,Y], cmap="plasma", s=10)
+        
         self.ax.axis([-10, 10, -10, 10])
         self.ani = FuncAnimation(self.fig, self.ani_update, interval=1000, blit=True)
 
@@ -85,6 +87,7 @@ class ParticleFilter1:
         self.scat.set_offsets(np.c_[ self.particles[:,X] , self.particles[:,Y]])
         self.scat.set_array(self.particles[:, W])
         return self.scat,
+
 
     def norm_particles(self):
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
