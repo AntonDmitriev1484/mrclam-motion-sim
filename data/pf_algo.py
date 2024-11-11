@@ -44,23 +44,18 @@ def dp(pos, label=None, color='000000'):
 
 def dparticle(particle, color='000000'):
     if DBG:
-        dp((particle.x, particle.y), color)
+        dp((particle[X], particle[Y]), color)
         d = 0.008 # length we want to show the direction vector at
-        start, _ = State2Vec(particle)
-        end = np.array( (particle.x + d*np.cos(particle.o), particle.y + d*np.sin(particle.o) )  )
+        start, _ = particle[:O] # Just want X, Y out of particle
+        end = np.array( (particle[X] + d*np.cos(particle[O]), particle[Y] + d*np.sin(particle[O]) )  )
         dv( start, end, color)
     else: return None
 
 def dparticle_weights(particles):
-    weights_colors = [p.weight for p in particles]
-    xs, ys = [p.x for p in particles] , [p.y for p in particles]
+    weights_colors = particles[:,W]
+    xs, ys = particles[:,X], particles[:,Y]
     plt.scatter(xs, ys, c=weights_colors, cmap='plasma', s=10)
 
-def State2Vec(state): # Returns <x,y>, orientation
-    return np.array((state.x, state.y)), state.o
-
-def Vec2State(state):
-    return State()
 
 
 # Mutable named tuples, require evo-slam environment python 3.7!
@@ -70,11 +65,8 @@ class Particle:
     y: float
     o: float
     weight: float
-    
-def Particle2StateVec(particle):
-    return np.array((particle.x, particle.y, particle.o))
 
-# Constants for accessing arrays
+# Constants for accessing self.particles
 X, Y, O, W = (0,1,2,3)
 
 # Reference: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
@@ -84,18 +76,18 @@ class ParticleFilter1:
         self.N = n_particles
         self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
         
-        # self.fig, self.ax = plt.sublplots()
-        # self.ani = FuncAnimation(self.fig, self.ani_update, interval=5, blit=True)
+        self.fig, self.ax = plt.subplots()
+        self.ax.axis([-10, 10, -10, 10])
+        self.ani = FuncAnimation(self.fig, self.ani_update, interval=1000, blit=True)
 
-    # # Run after update and measurement step, 
-    # def ani_update(self, i):
-    #     self.scat.set_offsets()
+    # Run after update and measurement step, 
+    def ani_update(self, i):
+        self.scat.set_offsets(np.c_[ self.particles[:,X] , self.particles[:,Y]])
+        self.scat.set_array(self.particles[:, W])
+        return self.scat,
 
-    #     return self.scat,
-
-    def r_weights(self): # Return copy of weights in our particles array
-        return [p.weight for p in self.particles]
-
+    def norm_particles(self):
+        self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
@@ -106,18 +98,14 @@ class ParticleFilter1:
         for i in range(self.N):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
-            self.particles[i][X] = start_pose.x + r * np.cos(theta)
-            self.particles[i][Y] = start_pose.y + r * np.sin(theta)
-            self.particles[i][O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
+            self.particles[i,X] = start_pose.x + r * np.cos(theta)
+            self.particles[i,Y] = start_pose.y + r * np.sin(theta)
+            self.particles[i,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
 
         var_x = np.var( self.particles[:,X], axis=0)
         var_y = np.var( self.particles[:,Y], axis=0)
         var_o = np.var( self.particles[:,O], axis=0)
-
         # So for NUMPY, you actually have to use the [ , ] in all scenarios for proper slicing
-        print(self.particles.shape)
-        print(self.particles[:].shape)
-        print(self.particles[:,:W].shape)
 
         mean_state = np.mean(self.particles[:,:W], axis=0)
         variances = np.array([var_x, var_y, var_o])
@@ -126,9 +114,7 @@ class ParticleFilter1:
         for i in range(self.N):
             self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,:W], mean=mean_state, cov=covariance)
 
-        # Distribution this gives us is correct, we just need to re-normalize everything to be out of 1
-        self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
-
+        self.norm_particles()
         # Draw particles with color representing weights
         # for p in self.particles:
         #     dparticle(p)
@@ -147,7 +133,6 @@ class ParticleFilter1:
 
     # Assuming UWB ref is an np vector
     def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
-
         # Only keep points that are within uwb_range+-10cm of ref
         for i in range(self.N):
             pos = np.array([self.particles[i, X], self.particles[i, Y]])
@@ -158,8 +143,7 @@ class ParticleFilter1:
             if not (dist_from_ref < outer and dist_from_ref > inner):
                 self.particles[i, W] = 0
         # Now normalize s.t. all weights sum to 1
-        print(f" sum {np.sum(self.particles[:,W])} ")
-        self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
+        self.norm_particles()
 
     def show_particles(self):
         dparticle_weights(self.particles)
@@ -168,7 +152,6 @@ class ParticleFilter1:
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
-        print(self.pose)
         return self.pose
     
     def need_resample(self): # Calculate effective n to determine if we need to resample
@@ -272,23 +255,10 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        particles_over_time.append(pf.particles)
+        pf.ani_update(t)
 
 
-
-    # camera = Camera(plt.figure())
-    # for ps in particles_over_time[:100]:
-    #     dparticle_weights(ps)
-    #     camera.snap()
-    #     # plt.clear()
-
-    # anim = camera.animate(blit=True)
-
-
-
-    # a = AnimatedScatter()
-    # plt.show()
-
+    plt.show()
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
     x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
