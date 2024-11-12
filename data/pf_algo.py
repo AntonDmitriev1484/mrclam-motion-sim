@@ -1,9 +1,11 @@
 import numpy as np
+
 import matplotlib.pyplot as plt
 import random
 from load_data import * 
 from dataclasses import dataclass
 from scipy.stats import multivariate_normal
+
 from matplotlib.animation import FuncAnimation
 from celluloid import Camera
 from AnimatedScatter import AnimatedScatter
@@ -75,26 +77,15 @@ class ParticleFilter1:
         self.pose = None
         self.N = n_particles
         self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
-        
-        self.fig, self.ax = plt.subplots()
-        self.scat = self.ax.scatter(self.particles[:,X], self.particles[:,Y], cmap="plasma", s=10)
-        
-        self.ax.axis([-10, 10, -10, 10])
-        self.ani = FuncAnimation(self.fig, self.ani_update, interval=1000, blit=True)
-
-    # Run after update and measurement step, 
-    def ani_update(self, i):
-        self.scat.set_offsets(np.c_[ self.particles[:,X] , self.particles[:,Y]])
-        self.scat.set_array(self.particles[:, W])
-        return self.scat,
-
+        self.particles_over_t = []
 
     def norm_particles(self):
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
-        r_dist = 0.25 # maximum distance of a particlef from start is 1/4meter in any direction
+        r_dist = 0.5 # maximum distance of a particlef from start is 1/4meter in any direction
+        # Slightly less hallucination with 0.5
         max_turn = np.pi / 10
 
         # Create states at uniform, and weight them according to 3D Gaussian
@@ -122,6 +113,14 @@ class ParticleFilter1:
         # for p in self.particles:
         #     dparticle(p)
         # dparticle_weights(self.particles)
+
+        # Works properly but crashes the program
+        # self.ax.plot(self.particles[:,X], self.particles[:,Y])
+        # plt.pause(0.1)
+        # plt.gca().cla() 
+
+        # The move might be providing a small range of debug frames that we
+        # plot normally and click through manually, 
         
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -146,7 +145,9 @@ class ParticleFilter1:
             if not (dist_from_ref < outer and dist_from_ref > inner):
                 self.particles[i, W] = 0
         # Now normalize s.t. all weights sum to 1
+
         self.norm_particles()
+        self.particles_over_t.append(self.particles)
 
     def show_particles(self):
         dparticle_weights(self.particles)
@@ -211,6 +212,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     dbg_start = 0
     # dbg_end = 300 * 100
     dbg_end = 120 * 100
+    
+    dbg_view_range = range(60 * 100, 90 * 100)
 
     # dbg_view = sim_time
     # dbg_view = 120*100 
@@ -222,6 +225,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     estimated_poses = []
     particles_over_time = []
 
+
     pf = ParticleFilter1(2000)
     pf.generate(all_gt_pose[robot_id][0])
 
@@ -231,10 +235,23 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
         #     estimated_poses.append(all_gt_pose[robot_id][t])
         if t % range_T == 0:
             print(f" Range # {t/range_T}")
+
+            # if t in dbg_view_range:
+            #     plt.figure("Pre-measurement")
+            #     dparticle_weights(pf.particles)
+            #     plt.show()
+
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
             pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
+
+            # if t in dbg_view_range:
+            #     plt.figure("Post-measurement")
+            #     dparticle_weights(pf.particles)
+            #     plt.show()
+
+            # I don't think the weights (or color mappings) are consistent across
 
             estimate = pf.estimate()
             estimated_poses.append(estimate)
@@ -258,10 +275,29 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        pf.ani_update(t)
 
+    
+    print(len(pf.particles_over_t))
+    
+    fig, ax = plt.subplots()
+    fig.suptitle("Particles over time")
+    ax.axes.grid() # I think its just displaying this and not performing any of changes on scat
+    for i in range(0, len(pf.particles_over_t)):
+        ax.cla()
+        scat =ax.scatter(pf.particles_over_t[i][:,X],pf.particles_over_t[i][:,Y], c='blue', s=1)
+        ax.axis([-10, 10, -10, 10])
 
-    plt.show()
+        # # Run after measurement step, 
+        # def ani_update(i):
+        #     print("in update")
+        #     particles = pf.particles_over_t[i]
+        #     scat.set_offsets(np.c_[ particles[:,X] , particles[:,Y]])
+        #     scat.set_array(particles[:, W])
+        #     return scat,
+
+        # ani = FuncAnimation(scat, ani_update, frames=range(0, int(dbg_end/range_T)), interval=1000, blit=False)
+
+        plt.show()
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
     x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
