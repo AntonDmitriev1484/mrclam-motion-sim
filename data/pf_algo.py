@@ -177,16 +177,16 @@ class ParticleFilter1:
         # add more noise the more curvature there is because we are less certain of our answer <- this strat works better it seems
         # or add more noise with less curvature, so we can recover closer to the GT line.
 
-        PARTICLE_CEIL = 100 # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
+        # PARTICLE_CEIL = 100 # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
 
-        TURN_CEIL = 0.10745999999999996
-        curve_ratio = (seg_curvature/TURN_CEIL)
-        print(f"Curve ratio {curve_ratio}")
+        # TURN_CEIL = 0.10745999999999996
+        # curve_ratio = (seg_curvature/TURN_CEIL)
+        # print(f"Curve ratio {curve_ratio}")
 
-        PARTICLE_CEIL *= curve_ratio
-        PARTICLE_CEIL = int(PARTICLE_CEIL)
+        # PARTICLE_CEIL *= curve_ratio
+        # PARTICLE_CEIL = int(PARTICLE_CEIL)
 
-        print(f"Noise particles: {PARTICLE_CEIL}")
+        # print(f"Noise particles: {PARTICLE_CEIL}")
 
         print("Pre-resample")
         self.show_particles()
@@ -206,7 +206,7 @@ class ParticleFilter1:
         # Once all particles weigh the same, we add noise to the data distribution
         # by randomly moving / re-orienting 100 particles.
         r_dist = 0.1
-        max_turn = np.pi / 12
+        max_turn = np.pi / 24 # Setting this to 12 RUINS perofrmance
 
         for _ in range(PARTICLE_CEIL):
             i = random.randint(0, self.N-1) # Pick a random particle to permute
