@@ -169,20 +169,24 @@ class ParticleFilter1:
         # print(f" N effective particles {neff}")
         threshold = self.N/5
 
-        # threshold = 50
-
-        # Also, suddenly re-sampling after a while causes jumps in trajectory
-        # Seems to hit the first steep curve and then immediately converge
-        # ' and curve_ratio > X '
-
+        # At a certain point we stop re-sampling?
         return neff < threshold
     
-    # TODO: Attempt re-sample more when low segment curvature. Kind of helps but doesn't fix much, because we converge to 1 particle too fast
-    # TODO: Need to maintain a floor of particles > 1 in our resample for estimate diversity
+    def simple_resample(self, seg_curvature):
+        # Maybe this PARTICLE_FLOOR should scale with segment curvature
+        # add more noise the more curvature there is because we are less certain of our answer <- this strat works better it seems
+        # or add more noise with less curvature, so we can recover closer to the GT line.
 
-    def simple_resample(self):
+        PARTICLE_CEIL = 100 # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
 
-        PARTICLE_FLOOR = 100 # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
+        TURN_CEIL = 0.10745999999999996
+        curve_ratio = (seg_curvature/TURN_CEIL)
+        print(f"Curve ratio {curve_ratio}")
+
+        PARTICLE_CEIL *= curve_ratio
+        PARTICLE_CEIL = int(PARTICLE_CEIL)
+
+        print(f"Noise particles: {PARTICLE_CEIL}")
 
         print("Pre-resample")
         self.show_particles()
@@ -202,14 +206,14 @@ class ParticleFilter1:
         # Once all particles weigh the same, we add noise to the data distribution
         # by randomly moving / re-orienting 100 particles.
         r_dist = 0.1
-        max_turn = np.pi / 8
+        max_turn = np.pi / 12
 
-        for _ in range(PARTICLE_FLOOR):
+        for _ in range(PARTICLE_CEIL):
             i = random.randint(0, self.N-1) # Pick a random particle to permute
-            r = random.uniform(0, r_dist)
-            theta = random.uniform(0, 2*np.pi)
-            self.particles[i,X] += r * np.cos(theta)
-            self.particles[i,Y] += r * np.sin(theta)
+            # r = random.uniform(0, r_dist)
+            # theta = random.uniform(0, 2*np.pi)
+            # self.particles[i,X] += r * np.cos(theta)
+            # self.particles[i,Y] += r * np.sin(theta)
             self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
         # self.norm_particles()
@@ -263,8 +267,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_end = 300 * 100
-    # dbg_end = 120 * 100
+    # dbg_end = 300 * 100
+    dbg_end = 120 * 100
     
     # dbg_view_range = range(60 * 100, 90 * 100)
     dbg_view_T = 10 * 100
@@ -296,7 +300,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             estimate = pf.estimate()
             estimated_poses.append(estimate)
 
-            if pf.need_resample(sum_delta_angle): pf.simple_resample()
+            if pf.need_resample(sum_delta_angle): pf.simple_resample(sum_delta_angle)
             # Now rotate the segment to meet this estimate
 
             sum_delta_angle = 0
