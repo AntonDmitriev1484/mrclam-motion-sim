@@ -4,6 +4,8 @@ from collections import namedtuple
 import math as math
 import csv
 
+DATA_DIR = "/home/admitriev/ISF24/mrclam-motion-sim/data"
+
 from scipy.spatial.transform import Rotation as R
 
 #Immutable by design
@@ -27,7 +29,7 @@ def pose_to_TUM(pose):
     return TUMPose(float(pose.time)/100, pose.x, pose.y, 0, quat[0], quat[1], quat[2], quat[3])
 
 def write_pose_data_TUM(filename, pose_data):
-    with open(f"C:\\Users\\soula\\OneDrive\\Desktop\\Programming\\ISF24\\UWBSLAMsim\\data\\eval_dataset\\{filename}.txt", 'w', newline='') as file:
+    with open(f"{DATA_DIR}/eval_dataset/{filename}.txt", 'w', newline='') as file:
         writer = csv.writer(file, delimiter=' ')
         file.write("# timestamp tx ty tz qx qy qz qw\n") #THIS FUCKING COMMENT WASTED 1 HOUR OF MY LIFE
         for row in pose_data:
@@ -39,12 +41,12 @@ def write_pose_data_TUM(filename, pose_data):
             writer.writerow(formatted)
 
 def load_MRCLAM_groundtruth(dataset_id, robot_id):
-    fstream = FileIO(f"C:\\Users\\soula\\OneDrive\\Desktop\\Programming\\ISF24\\UWBSLAMsim\\data\\MRCLAM_Dataset{dataset_id}\\Robot{robot_id}_Groundtruth.dat")
+    fstream = FileIO(f"{DATA_DIR}/MRCLAM_Dataset{dataset_id}/Robot{robot_id}_Groundtruth.dat")
     dataframe = pd.read_csv(fstream, delim_whitespace=True, comment='#').to_numpy()
     return dataframe
 
 def load_MRCLAM_odometry(dataset_id, robot_id):
-    fstream = FileIO(f"C:\\Users\\soula\\OneDrive\\Desktop\\Programming\\ISF24\\UWBSLAMsim\\data\\MRCLAM_Dataset{dataset_id}\\Robot{robot_id}_Odometry.dat")
+    fstream = FileIO(f"{DATA_DIR}/MRCLAM_Dataset{dataset_id}/Robot{robot_id}_Odometry.dat")
     dataframe = pd.read_csv(fstream, delim_whitespace=True, comment='#').to_numpy()
     return dataframe
 

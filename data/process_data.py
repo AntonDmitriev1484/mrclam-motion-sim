@@ -69,5 +69,5 @@ SLAM_T = 1800
 for i in range(1,2):
     # approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
     estimated_pose = measured_vo_to_algo2(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    # write_pose_data_TUM(f"R{i}_alg1", approx_pose)
-    write_pose_data_TUM(f"R{i}_alg1", estimated_pose)
+
+    # write_pose_data_TUM(f"R{i}_alg1", estimated_pose) #TODO: Comment back in when you want to use evo

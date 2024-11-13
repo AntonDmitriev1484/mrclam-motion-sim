@@ -1,13 +1,16 @@
+import matplotlib
+# matplotlib.use('Agg')
+
 import numpy as np
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import random
 from load_data import * 
 from dataclasses import dataclass
 from scipy.stats import multivariate_normal
 
 from matplotlib.animation import FuncAnimation
-from celluloid import Camera
 from AnimatedScatter import AnimatedScatter
 
 T=100
@@ -58,8 +61,6 @@ def dparticle_weights(particles):
     xs, ys = particles[:,X], particles[:,Y]
     plt.scatter(xs, ys, c=weights_colors, cmap='plasma', s=10)
 
-
-
 # Mutable named tuples, require evo-slam environment python 3.7!
 @dataclass
 class Particle:
@@ -86,7 +87,7 @@ class ParticleFilter1:
         # Radius of x,y s in our Gaussian multivariate
         r_dist = 0.5 # maximum distance of a particlef from start is 1/4meter in any direction
         # Slightly less hallucination with 0.5
-        max_turn = np.pi / 10
+        max_turn = np.pi / 8
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(self.N):
@@ -109,18 +110,6 @@ class ParticleFilter1:
             self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,:W], mean=mean_state, cov=covariance)
 
         self.norm_particles()
-        # Draw particles with color representing weights
-        # for p in self.particles:
-        #     dparticle(p)
-        # dparticle_weights(self.particles)
-
-        # Works properly but crashes the program
-        # self.ax.plot(self.particles[:,X], self.particles[:,Y])
-        # plt.pause(0.1)
-        # plt.gca().cla() 
-
-        # The move might be providing a small range of debug frames that we
-        # plot normally and click through manually, 
         
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -136,36 +125,100 @@ class ParticleFilter1:
     # Assuming UWB ref is an np vector
     def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
         # Only keep points that are within uwb_range+-10cm of ref
-        for i in range(self.N):
-            pos = np.array([self.particles[i, X], self.particles[i, Y]])
-            dist_from_ref = norm(pos - uwb_ref)
-            inner = uwb_range - UNCERTAIN
-            outer = uwb_range + UNCERTAIN
-            # Push all weights to 0 outside of the ranging
-            if not (dist_from_ref < outer and dist_from_ref > inner):
-                self.particles[i, W] = 0
-        # Now normalize s.t. all weights sum to 1
 
+        def normal_pdf(x, mean, std_dev):
+            """Calculates the Gaussian probability density function for a given value x."""
+            exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
+            return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
+
+        for i in range(self.N):
+            pos = self.particles[i,:O]
+
+            dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
+            p_uwb = normal_pdf(dist_from_ref, uwb_range, UNCERTAIN)
+            self.particles[i, W] *= p_uwb
+        
+        # Now normalize s.t. all weights sum to 1
         self.norm_particles()
-        self.particles_over_t.append(self.particles)
+
+        
+        print("Post-measurement")
+        self.show_particles()
+
+        print("Sum of weights before normalization")
+        # print(self.particles[:,W])
 
     def show_particles(self):
-        dparticle_weights(self.particles)
-        plt.show()
+        if False:
+            dparticle_weights(self.particles)
+            plt.show()
+            plt.clf()
 
     # Select the most likely particle as a weighted average of all remaining particles
     def estimate(self):
         self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
         return self.pose
     
-    def need_resample(self): # Calculate effective n to determine if we need to resample
+    def need_resample(self, seg_curvature): # Calculate effective n to determine if we need to resample
+
+        TURN_CEIL = 0.10745999999999996
+        curve_ratio = (seg_curvature / TURN_CEIL)**2
+    
         weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
         # print(f" N effective particles {neff}")
-        # threshold = self.N/2
-        threshold = 50
-        return neff < threshold
+        threshold = self.N/5
 
+        # threshold = 50
+
+        # Also, suddenly re-sampling after a while causes jumps in trajectory
+        # Seems to hit the first steep curve and then immediately converge
+        # ' and curve_ratio > X '
+
+        return neff < threshold
+    
+    # TODO: Attempt re-sample more when low segment curvature. Kind of helps but doesn't fix much, because we converge to 1 particle too fast
+    # TODO: Need to maintain a floor of particles > 1 in our resample for estimate diversity
+
+    def simple_resample(self):
+
+        PARTICLE_FLOOR = 100 # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
+
+        print("Pre-resample")
+        self.show_particles()
+
+        cumulative_sum = np.cumsum(self.particles[:,W])
+        cumulative_sum[-1] = 1. # avoid round-off error
+        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N))
+        # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
+
+        # resample according to indexes
+        self.particles[:] = self.particles[indexes]
+
+        # self.particles = next_particles
+        self.particles[:,W] = 1.0/ self.N 
+
+        
+        # Once all particles weigh the same, we add noise to the data distribution
+        # by randomly moving / re-orienting 100 particles.
+        r_dist = 0.1
+        max_turn = np.pi / 8
+
+        for _ in range(PARTICLE_FLOOR):
+            i = random.randint(0, self.N-1) # Pick a random particle to permute
+            r = random.uniform(0, r_dist)
+            theta = random.uniform(0, 2*np.pi)
+            self.particles[i,X] += r * np.cos(theta)
+            self.particles[i,Y] += r * np.sin(theta)
+            self.particles[i,O] += random.uniform(-max_turn , +max_turn)
+
+        # self.norm_particles()
+
+        print("Post-resample")
+        self.show_particles()
+        
+
+    # This resampling causes particle divergence!
     def resample(self):
         print("Re-sampling")
         weights = self.particles[:,W]
@@ -210,53 +263,40 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    # dbg_end = 300 * 100
-    dbg_end = 120 * 100
+    dbg_end = 300 * 100
+    # dbg_end = 120 * 100
     
-    dbg_view_range = range(60 * 100, 90 * 100)
+    # dbg_view_range = range(60 * 100, 90 * 100)
+    dbg_view_T = 10 * 100
 
-    # dbg_view = sim_time
-    # dbg_view = 120*100 
-    # dbg_view = 100*range_T
-    # dbg_view = 300 # range_T = 30
 
     sum_delta_angle = 0
 
     estimated_poses = []
-    particles_over_time = []
 
 
-    pf = ParticleFilter1(2000)
+    pf = ParticleFilter1(2000) # Can't really observe behavior on 2k particles freezes plot
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(0,dbg_end):
         # if t % SLAM_T == 0:
         #     #TODO: Do I need to add to imu_segment here also?
         #     estimated_poses.append(all_gt_pose[robot_id][t])
+
         if t % range_T == 0:
             print(f" Range # {t/range_T}")
-
-            # if t in dbg_view_range:
-            #     plt.figure("Pre-measurement")
-            #     dparticle_weights(pf.particles)
-            #     plt.show()
 
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
             pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
 
-            # if t in dbg_view_range:
-            #     plt.figure("Post-measurement")
-            #     dparticle_weights(pf.particles)
-            #     plt.show()
-
             # I don't think the weights (or color mappings) are consistent across
 
             estimate = pf.estimate()
             estimated_poses.append(estimate)
 
-            if pf.need_resample(): pf.resample()
+            if pf.need_resample(sum_delta_angle): pf.simple_resample()
             # Now rotate the segment to meet this estimate
 
             sum_delta_angle = 0
@@ -275,29 +315,10 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
+        if t % dbg_view_T ==0:
+            dparticle_weights(pf.particles)
 
-    
-    print(len(pf.particles_over_t))
-    
-    fig, ax = plt.subplots()
-    fig.suptitle("Particles over time")
-    ax.axes.grid() # I think its just displaying this and not performing any of changes on scat
-    for i in range(0, len(pf.particles_over_t)):
-        ax.cla()
-        scat =ax.scatter(pf.particles_over_t[i][:,X],pf.particles_over_t[i][:,Y], c='blue', s=1)
-        ax.axis([-10, 10, -10, 10])
-
-        # # Run after measurement step, 
-        # def ani_update(i):
-        #     print("in update")
-        #     particles = pf.particles_over_t[i]
-        #     scat.set_offsets(np.c_[ particles[:,X] , particles[:,Y]])
-        #     scat.set_array(particles[:, W])
-        #     return scat,
-
-        # ani = FuncAnimation(scat, ani_update, frames=range(0, int(dbg_end/range_T)), interval=1000, blit=False)
-
-        plt.show()
+    plt.show()
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
     x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
@@ -312,6 +333,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     plt.scatter(x, y, c='red', s=1)
 
     plt.show()
+    # plt.savefig('paths.png')
 
     return estimated_poses
 
