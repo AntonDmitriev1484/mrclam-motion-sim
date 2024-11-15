@@ -75,7 +75,6 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=Non
     v_0 = imu_pose - ref_pose
     v_UWB = UWB_range * (v_0 / np.linalg.norm(v_0))
 
-
     v_UWBR = rotate_vector(v_UWB,+90) # Check signage
     A=unit(dot(imu_dir,v_UWBR))
     B=-unit(dot(imu_dir,v_UWB))
@@ -89,7 +88,7 @@ def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=Non
     # else:
     #     S=rotate_vector(imu_dir, -90)
 
-    dv(imu_pose, imu_pose + 10*S, color='red')
+    # dv(imu_pose, imu_pose + 10*S, color='red')
     # S = np.dot(rotate_vector(v_UWB, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_UWB, 90), imu_dir))
     return S
 
@@ -234,13 +233,20 @@ class ParticleFilter1:
         denom = 24 - (16*curve_ratio)
         max_turn = np.pi / denom
 
+        # Generate noise particles in direction of our hint
+
+        dv(self.pose[:O], self.pose[:O]+hint, color='blue')
+
         for _ in range(N_noise):
             i = random.randint(0, self.N-1) # Pick a random particle to permute
-            r = random.uniform(0, r_dist)
-            theta = random.uniform(0, 2*np.pi)
-            self.particles[i,X] += r * np.cos(theta)
-            self.particles[i,Y] += r * np.sin(theta)
-            self.particles[i,O] += random.uniform(-max_turn , +max_turn)
+            if not (i in indexes): # If this is not one of our important points
+                r = random.uniform(0, r_dist)
+                theta = random.uniform(0, 2*np.pi)
+
+                self.particles[i,X] += r * np.cos(theta)
+                self.particles[i,Y] += r * np.sin(theta)
+                self.particles[i,:O] += (r)*hint # All noise particles get bumped towards the direction of the GT line
+                self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
         self.show_particles()
 
@@ -405,16 +411,17 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
             estimated_poses.append(estimate)
             
-            est_pos = estimate[:O]
-            est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
-            imu_dir_abs_radians = last_imu_integration.o
-            imu_dir = np.array([1*math.cos(imu_dir_abs_radians), 1*math.sin(imu_dir_abs_radians)]) 
+            # est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
+            # imu_dir_abs_radians = last_imu_integration.o
+            # imu_dir = np.array([1*math.cos(imu_dir_abs_radians), 1*math.sin(imu_dir_abs_radians)]) 
 
-            vec = trig_approx(ref_pos, true_pos, est_pos, est_dir2, sum_delta_angle)
+            vec = trig_approx(ref_pos, true_pos, estimate[[X,Y]], est_dir2, sum_delta_angle)
             S_vectors.append(vec) # For later re-drawing
 
-            hint = unit(true_pos - est_pos) # Suppose we know the general direction that we drifted off of GT
+            hint = unit(true_pos - estimate[[X,Y]]) # Suppose we know the general direction that we drifted off of GT
 
+            # Performs about as bad as usual when we pass our trigapprox vector in as a hint
+            # -> the one thats basically wrong half the time
             if pf.need_resample(sum_delta_angle): pf.resample(sum_delta_angle, hint)
             # Now rotate the segment to meet this estimate
 
@@ -437,7 +444,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             imu_segment[i] = cur_pose
 
         # if t % dbg_view_T ==0:
-        #     # dparticle_weights(pf.particles)
+        #     dparticle_weights(pf.particles)
 
     # plt.show()
 
