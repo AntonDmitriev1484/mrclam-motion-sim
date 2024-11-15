@@ -69,6 +69,37 @@ class Particle:
     o: float
     weight: float
 
+def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
+    UWB_range = np.linalg.norm(ref_pose - true_pose)
+    v_0 = imu_pose - ref_pose
+    v_UWB = UWB_range * (v_0 / np.linalg.norm(v_0))
+    v_1 = v_0 - v_UWB
+    pivot = ref_pose + v_UWB
+    A = np.arccos(np.dot(imu_dir,v_1)/ (np.linalg.norm(imu_dir)*np.linalg.norm(v_1))) # IN RADIANS
+    S = np.dot(rotate_vector(v_1, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_1, 90), imu_dir))
+    B = (A-np.radians(90))/abs(A-np.radians(90)) # 90 is 1.5708 radians
+
+    dv(imu_pose, imu_pose+imu_dir)
+    dv(imu_pose, imu_pose+unit(v_UWB)/25, color='purple')
+    # print(f"A {np.degrees(A)} S {S} B {B}")
+
+
+    v_UWBR = rotate_vector(v_UWB,+90) # Check signage
+    A=unit(dot(imu_dir,v_UWBR))
+    B=-unit(dot(imu_dir,v_UWB))
+    S=rotate_vector(imu_dir,A*B*90)
+
+    # R = rotate_vector(v_UWB,+90)
+    # L = rotate_vector(v_UWB,-90)
+    # if dot(R, imu_dir) >= 0:
+    #     S = rotate_vector(imu_dir, +90)
+    # else:
+    #     S=rotate_vector(imu_dir, -90)
+
+    dv(imu_pose, imu_pose + 10*S, color='red')
+    # S = np.dot(rotate_vector(v_UWB, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_UWB, 90), imu_dir))
+    return S
+
 # Constants for accessing self.particles
 X, Y, O, W = (0,1,2,3)
 
@@ -142,11 +173,8 @@ class ParticleFilter1:
         self.norm_particles()
 
         
-        print("Post-measurement")
         self.show_particles()
 
-        print("Sum of weights before normalization")
-        # print(self.particles[:,W])
 
     def show_particles(self):
         if False:
@@ -169,24 +197,30 @@ class ParticleFilter1:
         # print(f" N effective particles {neff}")
         threshold = self.N/2
         # At a certain point we stop re-sampling?
-        return neff < threshold
+        return neff < 100
     
     def simple_resample(self, seg_curvature):
         # Maybe this PARTICLE_FLOOR should scale with segment curvature
         # add more noise the more curvature there is because we are less certain of our answer <- this strat works better it seems
         # or add more noise with less curvature, so we can recover closer to the GT line.
 
-        PARTICLE_CEIL = int(np.sum(self.particles[:,W])/self.N) # This has to be high enough to tweak the estimate towards GT, but not high enough to make the estimate random
+        print("Resampling")
+        # N_noise = np.sum(self.particles[:,W]) / self.N # Giving very small -> 0.0005 results
+        # Why are our weights driven so low by the time we resample?
+        N_noise = 1000
+        ceil = 1000
+
+        print(f"Noise particles formula: {N_noise}")
         TURN_CEIL = 0.10745999999999996
         curve_ratio = (seg_curvature/TURN_CEIL)**2
+
         print(f"Curve ratio {curve_ratio}")
+        if curve_ratio > 0: 
+            N_noise = 100 + (ceil-100)*curve_ratio # set a ceiling of 1000 and floor of 100 noise particles
 
-        if curve_ratio > 0: PARTICLE_CEIL /= curve_ratio
-        PARTICLE_CEIL = int(PARTICLE_CEIL)
+        N_noise = int(N_noise)
+        print(f"Noise particles after curve: {N_noise}")
 
-        # print(f"Noise particles: {PARTICLE_CEIL}")
-
-        print("Pre-resample")
         self.show_particles()
 
         cumulative_sum = np.cumsum(self.particles[:,W])
@@ -201,10 +235,13 @@ class ParticleFilter1:
         # Once all particles weigh the same, we add noise to the data distribution
         # by randomly moving / re-orienting 100 particles.
         r_dist = 0.25
-        
-        max_turn = np.pi / 12 # Setting this to 12 RUINS perofrmance
 
-        for _ in range(PARTICLE_CEIL):
+        # Lets set a range on variance between 8 and 24
+        # higher curve ratio brings us closer to 8, lower to 24
+        denom = 24 - (16*curve_ratio)
+        max_turn = np.pi / denom
+
+        for _ in range(N_noise):
             i = random.randint(0, self.N-1) # Pick a random particle to permute
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
@@ -212,7 +249,6 @@ class ParticleFilter1:
             self.particles[i,Y] += r * np.sin(theta)
             self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
-        print("Post-resample")
         self.show_particles()
         
 
@@ -364,6 +400,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     start_pose = all_gt_pose[robot_id][0] #starts at ground truth
     imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
     imu_segment[0] = State(start_pose.x, start_pose.y, start_pose.orientation)
+    last_imu_integration = State(start_pose.x, start_pose.y, start_pose.orientation)
 
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
@@ -376,6 +413,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     sum_delta_angle = 0
 
     estimated_poses = []
+    S_vectors = []
+    trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
 
     pf = ParticleFilter1(2000) # Can't really observe behavior on 2k particles freezes plot
@@ -394,10 +433,26 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
 
             pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
 
-            # I don't think the weights (or color mappings) are consistent across
 
             estimate = pf.estimate()
+
+            if len(estimated_poses)==0: est_dir2 = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
+            else: est_dir2 = (estimate[:O] - estimated_poses[-1][:O])
+
             estimated_poses.append(estimate)
+            
+            est_pos = estimate[:O]
+
+            imu_dir_abs_radians = last_imu_integration.o
+            imu_dir = np.array([1*math.cos(imu_dir_abs_radians), 1*math.sin(imu_dir_abs_radians)]) 
+
+            est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
+            # Ok I think the math is right the direction estimates are just cooked
+
+
+            vec = trig_approx(ref_pos, true_pos, est_pos, est_dir2, sum_delta_angle)
+            # trig_estimated_poses.append(pose)
+            S_vectors.append(vec) # For later re-drawing
 
             if pf.need_resample(sum_delta_angle): pf.simple_resample(sum_delta_angle)
             # Now rotate the segment to meet this estimate
@@ -415,17 +470,27 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             dx = vo.fv * dT * math.cos(prev_pose.o)        # cos = A/H
             do = (vo.av) * dT
             cur_pose = State(prev_pose.x + dx, prev_pose.y + dy, prev_pose.o + do)
+            last_imu_integration=cur_pose
+
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        if t % dbg_view_T ==0:
-            dparticle_weights(pf.particles)
+        # if t % dbg_view_T ==0:
+        #     # dparticle_weights(pf.particles)
 
-    plt.show()
+    # plt.show()
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
     x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
     plt.scatter(x, y, c='blue', s=10)
+
+    # Re-draw how S_vectors fall onto our estimated poses
+    # for pose, s_vec in zip(estimated_poses, S_vectors):
+    #     dv(pose[:O], pose[:O]+s_vec)
+
+
+    # x, y = ([p[0] for p in trig_estimated_poses[:dbg_end]] , [p[1] for p in trig_estimated_poses[:dbg_end]])
+    # plt.scatter(x, y, c='orange', s=10)
 
     x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
     plt.scatter(x, y, c='green', s=1)
