@@ -71,23 +71,16 @@ class Particle:
 
 def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
     UWB_range = np.linalg.norm(ref_pose - true_pose)
+
     v_0 = imu_pose - ref_pose
     v_UWB = UWB_range * (v_0 / np.linalg.norm(v_0))
-    v_1 = v_0 - v_UWB
-    pivot = ref_pose + v_UWB
-    A = np.arccos(np.dot(imu_dir,v_1)/ (np.linalg.norm(imu_dir)*np.linalg.norm(v_1))) # IN RADIANS
-    S = np.dot(rotate_vector(v_1, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_1, 90), imu_dir))
-    B = (A-np.radians(90))/abs(A-np.radians(90)) # 90 is 1.5708 radians
-
-    dv(imu_pose, imu_pose+imu_dir)
-    dv(imu_pose, imu_pose+unit(v_UWB)/25, color='purple')
-    # print(f"A {np.degrees(A)} S {S} B {B}")
 
 
     v_UWBR = rotate_vector(v_UWB,+90) # Check signage
     A=unit(dot(imu_dir,v_UWBR))
     B=-unit(dot(imu_dir,v_UWB))
     S=rotate_vector(imu_dir,A*B*90)
+    # I think if I take this approach further it might start messing up
 
     # R = rotate_vector(v_UWB,+90)
     # L = rotate_vector(v_UWB,-90)
@@ -199,7 +192,7 @@ class ParticleFilter1:
         # At a certain point we stop re-sampling?
         return neff < 100
     
-    def simple_resample(self, seg_curvature):
+    def resample(self, seg_curvature, hint):
         # Maybe this PARTICLE_FLOOR should scale with segment curvature
         # add more noise the more curvature there is because we are less certain of our answer <- this strat works better it seems
         # or add more noise with less curvature, so we can recover closer to the GT line.
@@ -250,35 +243,6 @@ class ParticleFilter1:
             self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
         self.show_particles()
-        
-
-    # This resampling causes particle divergence!
-    def resample(self):
-        print("Re-sampling")
-        weights = self.particles[:,W]
-
-        zero_weights = 0
-        for p in self.particles:
-            if p[W] <= 0.0001 : zero_weights += 1
-        # print(f" Before resampling # 0 weights {zero_weights} ")
-
-        cumulative_sum = np.cumsum(weights)
-        cumulative_sum[-1] = 1. # avoid round-off error
-        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N)) 
-
-        candidates = []
-        for i in range(self.N):
-            if i in indexes: candidates.append(self.particles[i]) # Adding a whole [x,y,o,w]
-
-        for particle in candidates:
-            t = random.randint(0, self.N)
-            while t in indexes:
-                t = random.randint(0, self.N)
-            # Pick a non-candidate index
-            self.particles[i] = particle
-            
-        for i in range(self.N):
-            self.particles[i, W] = 1./self.N
 
 class ParticleFilter2:
     def __init__(self, n_particles):
@@ -442,19 +406,16 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             estimated_poses.append(estimate)
             
             est_pos = estimate[:O]
-
+            est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
             imu_dir_abs_radians = last_imu_integration.o
             imu_dir = np.array([1*math.cos(imu_dir_abs_radians), 1*math.sin(imu_dir_abs_radians)]) 
 
-            est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
-            # Ok I think the math is right the direction estimates are just cooked
-
-
             vec = trig_approx(ref_pos, true_pos, est_pos, est_dir2, sum_delta_angle)
-            # trig_estimated_poses.append(pose)
             S_vectors.append(vec) # For later re-drawing
 
-            if pf.need_resample(sum_delta_angle): pf.simple_resample(sum_delta_angle)
+            hint = unit(true_pos - est_pos) # Suppose we know the general direction that we drifted off of GT
+
+            if pf.need_resample(sum_delta_angle): pf.resample(sum_delta_angle, hint)
             # Now rotate the segment to meet this estimate
 
             sum_delta_angle = 0
