@@ -262,8 +262,10 @@ class AntColonyParticleFilter:
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
+
         r_dist = 0.5 
         max_turn = np.pi / 8
+
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(0, self.N*self.M, self.M):
@@ -276,10 +278,11 @@ class AntColonyParticleFilter:
             pos_y = start_pose.y + r * np.sin(theta)
 
             # Initialize M particles with the same position, but different orientation
-            for j in range(i, self.M):
-                self.particles[i+j,O] = pos_x
-                self.particles[i+j,O] = pos_y
+            for j in range(0, self.M):
+                self.particles[i+j,X] = pos_x
+                self.particles[i+j,Y] = pos_y
                 self.particles[i+j,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
+                # print(f"Generated particle: {self.particles[i+j, ]}")
 
         # Initialize all particles to have uniform weights
         for i in range(0, self.N*self.M):
@@ -288,7 +291,10 @@ class AntColonyParticleFilter:
     def update(self, vo):
         # Update each particle according to visual odometry measurement
         dT = 1/T
-        for i in range(self.N):
+        for i in range(self.N*self.M):
+            # Check that I am not just propogating along VO!!!
+            # I should be propogating along VO + the random theta I originally generated
+
             dy = vo.fv * dT * math.sin(self.particles[i, O])         # sin = O/H
             dx = vo.fv * dT * math.cos(self.particles[i, O])        # cos = A/H
             do = (vo.av) * dT
@@ -297,7 +303,7 @@ class AntColonyParticleFilter:
             self.particles[i, O] += do
 
     # Assuming UWB ref is an np vector
-    def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
+    def measurement(self, uwb_ref, uwb_range):
         # Only keep points that are within uwb_range+-10cm of ref
 
         def normal_pdf(x, mean, std_dev):
@@ -305,8 +311,8 @@ class AntColonyParticleFilter:
             exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
             return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
 
-        for i in range(self.N):
-            pos = self.particles[i,:O]
+        for i in range(self.N*self.M):
+            pos = self.particles[i,[X,Y]]
 
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
             p_uwb = normal_pdf(dist_from_ref, uwb_range, UNCERTAIN)
@@ -314,6 +320,7 @@ class AntColonyParticleFilter:
         
         # Now normalize s.t. all weights sum to 1
         self.norm_particles()
+        print("Measurement")
         self.show_particles()
 
 
@@ -328,16 +335,48 @@ class AntColonyParticleFilter:
         self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
         return self.pose
     
-    def need_resample(self, seg_curvature): # Calculate effective n to determine if we need to resample
+    def need_resample(self): # Calculate effective n to determine if we need to resample
         self.norm_particles()
         weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
+        print(f"neff {neff}")
         return neff < 100
     
-    def resample(self, seg_curvature, hint):
+    def resample(self):
         print("Resampling")
+        cumulative_sum = np.cumsum(self.particles[:,W])
+        cumulative_sum[-1] = 1. # avoid round-off error
+        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N*self.M))
+        # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
 
-        self.show_particles()
+        # resample according to indexes
+        self.particles[:] = self.particles[indexes]
+        self.particles[:,W] = 1.0/(self.N * self.M)
+    
+    # def resample(self):
+    #     print("Resampling")
+
+    #     thresh = 0.25
+    #     denom = 0
+
+    #     for i in range(self.N * self.M):
+    #         for j in range(self.N * self.M):
+    #             dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
+    #             d_weight = abs(self.particles[i,W] - self.particles[j, W])
+    #             denom += (dist* d_weight)
+
+    #     for i in range(self.N * self.M):
+    #         for j in range(self.N * self.M):
+    #             dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
+    #             d_weight = abs(self.particles[i,W] - self.particles[j, W])
+                
+    #             p_move = (dist * d_weight) / denom
+
+    #             # If our probability is above the threshold, move i to j
+    #             if p_move > thresh:
+    #                 self.particles[i,[X,Y]] = self.particles[j,[X,Y]]
+
+    #     self.show_particles()
        
 
 
@@ -361,14 +400,13 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     dbg_end = 120 * 100
     dbg_view_T = 10 * 100
 
-
     sum_delta_angle = 0
 
     estimated_poses = []
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
-    pf = AntColonyParticleFilter(400, 400) # Can't really observe behavior on 2k particles freezes plot
+    pf = AntColonyParticleFilter(100, 100)
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(0,dbg_end):
@@ -382,29 +420,12 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
-            pf.measurement(ref_pos, norm(v_uwb), true_pos, sum_delta_angle)
-
+            pf.measurement(ref_pos, norm(v_uwb))
 
             estimate = pf.estimate()
-
-            if len(estimated_poses)==0: est_dir2 = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
-            else: est_dir2 = (estimate[:O] - estimated_poses[-1][:O])
-
             estimated_poses.append(estimate)
-            
-            # est_dir = np.array([1*math.cos(estimate[O]), 1*math.sin(estimate[O])])
-            # imu_dir_abs_radians = last_imu_integration.o
-            # imu_dir = np.array([1*math.cos(imu_dir_abs_radians), 1*math.sin(imu_dir_abs_radians)]) 
 
-            vec = trig_approx(ref_pos, true_pos, estimate[[X,Y]], est_dir2, sum_delta_angle)
-            S_vectors.append(vec) # For later re-drawing
-
-            hint = unit(true_pos - estimate[[X,Y]]) # Suppose we know the general direction that we drifted off of GT
-
-            # Performs about as bad as usual when we pass our trigapprox vector in as a hint
-            # -> the one thats basically wrong half the time
-            if pf.need_resample(sum_delta_angle): pf.resample(sum_delta_angle, hint)
-            # Now rotate the segment to meet this estimate
+            if pf.need_resample(): pf.resample()
 
             sum_delta_angle = 0
         else:
@@ -424,22 +445,14 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        # if t % dbg_view_T ==0:
-        #     dparticle_weights(pf.particles)
+        if t % dbg_view_T ==0:
+            dparticle_weights(pf.particles)
 
     # plt.show()
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
     x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
     plt.scatter(x, y, c='blue', s=10)
-
-    # Re-draw how S_vectors fall onto our estimated poses
-    # for pose, s_vec in zip(estimated_poses, S_vectors):
-    #     dv(pose[:O], pose[:O]+s_vec)
-
-
-    # x, y = ([p[0] for p in trig_estimated_poses[:dbg_end]] , [p[1] for p in trig_estimated_poses[:dbg_end]])
-    # plt.scatter(x, y, c='orange', s=10)
 
     x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
     plt.scatter(x, y, c='green', s=1)
