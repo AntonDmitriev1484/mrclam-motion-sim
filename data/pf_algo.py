@@ -300,7 +300,7 @@ class AntColonyParticleFilter:
 
             dy = vo.fv * dT * math.sin(self.particles[i, O])         # sin = O/H
             dx = vo.fv * dT * math.cos(self.particles[i, O])        # cos = A/H
-            
+
             self.particles[i, X] += dx
             self.particles[i, Y] += dy
 
@@ -345,41 +345,44 @@ class AntColonyParticleFilter:
         print(f"neff {neff}")
         return neff < 100
     
-    def resample(self):
-        print("Resampling")
-        cumulative_sum = np.cumsum(self.particles[:,W])
-        cumulative_sum[-1] = 1. # avoid round-off error
-        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N*self.M))
-        # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
-
-        # resample according to indexes
-        self.particles[:] = self.particles[indexes]
-        self.particles[:,W] = 1.0/(self.N * self.M)
-    
     # def resample(self):
     #     print("Resampling")
+    #     cumulative_sum = np.cumsum(self.particles[:,W])
+    #     cumulative_sum[-1] = 1. # avoid round-off error
+    #     indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N*self.M))
+    #     # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
 
-    #     thresh = 0.25
-    #     denom = 0
+    #     # resample according to indexes
+    #     self.particles[:] = self.particles[indexes]
+    #     self.particles[:,W] = 1.0/(self.N * self.M)
+    
+    def resample(self):
+        print("Resampling")
 
-    #     for i in range(self.N * self.M):
-    #         for j in range(self.N * self.M):
-    #             dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
-    #             d_weight = abs(self.particles[i,W] - self.particles[j, W])
-    #             denom += (dist* d_weight)
+        thresh = 0.25
+        denom = 0
 
-    #     for i in range(self.N * self.M):
-    #         for j in range(self.N * self.M):
-    #             dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
-    #             d_weight = abs(self.particles[i,W] - self.particles[j, W])
+
+        for i in range(0 , self.N * self.M, self.M):
+            for j in range(0, self.N * self.M, self.M):
+
+                dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
+                d_weight = abs(self.particles[i,W] - self.particles[j, W])
+                denom += (dist* d_weight) * self.M
+
+        for i in range(0 , self.N * self.M, self.M):
+            for j in range(0, self.N * self.M, self.M):
+
+                dist = abs(norm(self.particles[i,[X,Y]] - self.particles[j,[X,Y]]))
+                d_weight = abs(self.particles[i,W] - self.particles[j, W])
                 
-    #             p_move = (dist * d_weight) / denom
+                p_move = (dist * d_weight) / denom
 
-    #             # If our probability is above the threshold, move i to j
-    #             if p_move > thresh:
-    #                 self.particles[i,[X,Y]] = self.particles[j,[X,Y]]
+                # If our probability is above the threshold, move all particles with the same position as i, to j
+                if p_move > thresh:
+                    self.particles[ i:(i+self.M),[X,Y]] = self.particles[ j:(j+self.M),[X,Y]]
 
-    #     self.show_particles()
+        self.show_particles()
        
 
 
@@ -410,6 +413,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
     pf = AntColonyParticleFilter(100, 100)
+
+    # 
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(0,dbg_end):
@@ -448,8 +453,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        if t % dbg_view_T ==0:
-            dparticle_weights(pf.particles)
+        # if t % dbg_view_T ==0:
+        #     dparticle_weights(pf.particles)
 
     # plt.show()
 
