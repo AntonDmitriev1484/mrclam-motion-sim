@@ -250,41 +250,40 @@ class ParticleFilter1:
 
         self.show_particles()
 
-class ParticleFilter2:
-    def __init__(self, n_particles):
+class AntColonyParticleFilter:
+    def __init__(self, n_particles, m_particles):
         self.pose = None
-        self.N = n_particles
-        self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
+        self.N = n_particles # position particles
+        self.M = m_particles # orientation particles
+        self.particles = np.zeros((n_particles*m_particles, 4)) # n_particles rows, 4 columns
         self.particles_over_t = []
 
     def norm_particles(self):
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
-        r_dist = 0.5
+        r_dist = 0.5 
         max_turn = np.pi / 8
 
         # Create states at uniform, and weight them according to 3D Gaussian
-        for i in range(self.N):
+        for i in range(0, self.N*self.M, self.M):
+
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
-            self.particles[i,X] = start_pose.x + r * np.cos(theta)
-            self.particles[i,Y] = start_pose.y + r * np.sin(theta)
-            self.particles[i,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
 
-        var_x = np.var( self.particles[:,X], axis=0)
-        var_y = np.var( self.particles[:,Y], axis=0)
-        var_o = np.var( self.particles[:,O], axis=0)
-        # So for NUMPY, you actually have to use the [ , ] in all scenarios for proper slicing
+            # We have N particles with random positions
+            pos_x = start_pose.x + r * np.cos(theta)
+            pos_y = start_pose.y + r * np.sin(theta)
 
-        mean_state = np.mean(self.particles[:,:W], axis=0)
-        variances = np.array([var_x, var_y, var_o])
-        covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
+            # Initialize M particles with the same position, but different orientation
+            for j in range(i, self.M):
+                self.particles[i+j,O] = pos_x
+                self.particles[i+j,O] = pos_y
+                self.particles[i+j,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
 
-        for i in range(self.N):
-            self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,:W], mean=mean_state, cov=covariance)
-
-        self.norm_particles()
+        # Initialize all particles to have uniform weights
+        for i in range(0, self.N*self.M):
+            self.particles[i, W] = 1/(self.N*self.M)
         
     def update(self, vo):
         # Update each particle according to visual odometry measurement
@@ -315,12 +314,8 @@ class ParticleFilter2:
         
         # Now normalize s.t. all weights sum to 1
         self.norm_particles()
-
-        print("Post-measurement")
         self.show_particles()
 
-        print("Sum of weights before normalization")
-        # print(self.particles[:,W])
 
     def show_particles(self):
         if False:
@@ -334,29 +329,16 @@ class ParticleFilter2:
         return self.pose
     
     def need_resample(self, seg_curvature): # Calculate effective n to determine if we need to resample
-        TURN_CEIL = 0.10745999999999996
-        curve_ratio = (seg_curvature / TURN_CEIL)**2
-    
+        self.norm_particles()
         weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
-        threshold = self.N/5
-
-        return neff < threshold
+        return neff < 100
     
-    def simple_resample(self, seg_curvature):
-        print("Pre-resample")
-        self.show_particles()
-        cumulative_sum = np.cumsum(self.particles[:,W])
-        cumulative_sum[-1] = 1. # avoid round-off error
-        indexes = np.searchsorted(cumulative_sum, np.random.rand(self.N))
-        # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
+    def resample(self, seg_curvature, hint):
+        print("Resampling")
 
-        # resample according to indexes
-        self.particles[:] = self.particles[indexes]
-        self.particles[:,W] = 1.0/ self.N 
-        print("Post-resample")
         self.show_particles()
-        
+       
 
 
 def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
@@ -386,8 +368,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
-
-    pf = ParticleFilter1(2000) # Can't really observe behavior on 2k particles freezes plot
+    pf = AntColonyParticleFilter(400, 400) # Can't really observe behavior on 2k particles freezes plot
     pf.generate(all_gt_pose[robot_id][0])
 
     for t in range(0,dbg_end):
