@@ -294,13 +294,16 @@ class AntColonyParticleFilter:
         for i in range(self.N*self.M):
             # Check that I am not just propogating along VO!!!
             # I should be propogating along VO + the random theta I originally generated
+            
+            do = (vo.av) * dT
+            self.particles[i, O] += do
 
             dy = vo.fv * dT * math.sin(self.particles[i, O])         # sin = O/H
             dx = vo.fv * dT * math.cos(self.particles[i, O])        # cos = A/H
-            do = (vo.av) * dT
+            
             self.particles[i, X] += dx
             self.particles[i, Y] += dy
-            self.particles[i, O] += do
+
 
     # Assuming UWB ref is an np vector
     def measurement(self, uwb_ref, uwb_range):
