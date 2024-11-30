@@ -263,8 +263,8 @@ class AntColonyParticleFilter:
 
     def generate(self, start_pose):
 
-        r_dist = 0.5 
-        max_turn = np.pi / 8
+        r_dist = 0.25
+        max_turn = np.pi / 12
 
 
         # Create states at uniform, and weight them according to 3D Gaussian
@@ -319,8 +319,12 @@ class AntColonyParticleFilter:
 
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
             p_uwb = normal_pdf(dist_from_ref, uwb_range, UNCERTAIN)
-            self.particles[i, W] *= p_uwb
-        
+            # self.particles[i, W] *= p_uwb 
+            # *= approach may not be working when we spawn a ton of particles, multiplying by p_UWB ends up being negligible
+            # relative difference?
+            # But we need *= as that is what carries over probabilities from the last step
+            self.particles[i, W] = p_uwb
+
         # Now normalize s.t. all weights sum to 1
         self.norm_particles()
         print("Measurement")
@@ -359,8 +363,19 @@ class AntColonyParticleFilter:
     def resample(self):
         print("Resampling")
 
-        thresh = 0.25
+        thresh = 0.0001
         denom = 0
+
+        # Bug might be in schizophrenic iterations you're doing
+        # Maybe just convert to 2D array where each row is a single position and unique rotations
+        # Iterate through 2D array, and just flatten the array when you need to
+
+        # Also, this only seems to be taking out variance from the particle distribution
+        # It doesn't seem like we're properly deleting the particles that are useless
+        # Maybe because everything has uniform weight before we re-sample?
+        # It seems measurement is updating way less particles than its supposed to
+        # It's like there is one effective measurement at the start, and then weights fade out to 0
+        # Even with a more correct measurement step, we still have a lot of useless particles hovering over IMU
 
 
         for i in range(0 , self.N * self.M, self.M):
@@ -370,6 +385,7 @@ class AntColonyParticleFilter:
                 d_weight = abs(self.particles[i,W] - self.particles[j, W])
                 denom += (dist* d_weight) * self.M
 
+        max_p = 0
         for i in range(0 , self.N * self.M, self.M):
             for j in range(0, self.N * self.M, self.M):
 
@@ -377,11 +393,13 @@ class AntColonyParticleFilter:
                 d_weight = abs(self.particles[i,W] - self.particles[j, W])
                 
                 p_move = (dist * d_weight) / denom
+                if p_move > max_p: max_p = p_move
 
                 # If our probability is above the threshold, move all particles with the same position as i, to j
                 if p_move > thresh:
                     self.particles[ i:(i+self.M),[X,Y]] = self.particles[ j:(j+self.M),[X,Y]]
 
+        print(f" Max movement prob  = { max_p}")
         self.show_particles()
        
 
@@ -412,7 +430,7 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
-    pf = AntColonyParticleFilter(100, 100)
+    pf = AntColonyParticleFilter(100, 20)
 
     # 
     pf.generate(all_gt_pose[robot_id][0])
@@ -453,8 +471,8 @@ def measured_vo_to_algo2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-        # if t % dbg_view_T ==0:
-        #     dparticle_weights(pf.particles)
+        if t % dbg_view_T ==0:
+            dparticle_weights(pf.particles)
 
     # plt.show()
 
