@@ -23,7 +23,7 @@ def unit(v):
 def rad_between_vec(v_1, v_2):
     return np.arccos(dot(v_1, v_2) / (norm(v_1)*norm(v_2)))
 
-DBG = True
+DBG = False
 def dv(start, end, label=None, color='000000'):
     end = end-start
     if DBG: plt.arrow(start[0], start[1], end[0], end[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
