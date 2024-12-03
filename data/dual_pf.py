@@ -13,7 +13,7 @@ UNCERTAIN = 0.01 # 10cm
 X, Y, O, W = (0,1,2,3)
 
 # Reference: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
-class ParticleFilter:
+class DualMeasurementParticleFilter:
     def __init__(self, n_particles):
         self.pose = None
         self.N = n_particles
@@ -63,25 +63,33 @@ class ParticleFilter:
             self.particles[i, O] += do
 
     # Assuming UWB ref is an np vector
-    def measurement(self, uwb_ref, uwb_range, hint_pos, seg_curve):
+    def measurement(self, uwb_ref, uwb_range):
         # Only keep points that are within uwb_range+-10cm of ref
 
-        def normal_pdf(x, mean, std_dev):
-            """Calculates the Gaussian probability density function for a given value x."""
-            exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
-            return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
-
         for i in range(self.N):
-            pos = self.particles[i,:O]
-
+            pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
             p_uwb = normal_pdf(dist_from_ref, uwb_range, UNCERTAIN)
+
+            # delta = abs(dist_from_ref - uwb_range)
+            # if delta > UNCERTAIN: self.particles[i, W] *= 0
+
             self.particles[i, W] *= p_uwb
         
         # Now normalize s.t. all weights sum to 1
         self.norm_particles()
+        self.show_particles()
 
-        
+    def dual_measurement(self, uwb_ref1, uwb_range1, uwb_ref2, uwb_range2):
+        # Re-weigh particles to 
+        for i in range(self.N):
+            pos = self.particles[i,[X,Y]]
+            d_ref1 = norm(pos - uwb_ref1)
+            d_ref2 = norm(pos - uwb_ref2)
+
+            self.particles[i, W] = normal_pdf(d_ref1, uwb_range1, UNCERTAIN) * normal_pdf(d_ref2, uwb_range2, UNCERTAIN)
+
+        self.norm_particles()
         self.show_particles()
 
 
@@ -108,16 +116,11 @@ class ParticleFilter:
         # At a certain point we stop re-sampling?
         return neff < 100
     
-    def resample(self, seg_curvature, hint):
-        # Maybe this PARTICLE_FLOOR should scale with segment curvature
-        # add more noise the more curvature there is because we are less certain of our answer <- this strat works better it seems
-        # or add more noise with less curvature, so we can recover closer to the GT line.
+    def resample(self, seg_curvature):
 
         print("Resampling")
-        # N_noise = np.sum(self.particles[:,W]) / self.N # Giving very small -> 0.0005 results
-        # Why are our weights driven so low by the time we resample?
-        N_noise = 1000
-        ceil = 1000
+        N_noise = 100
+        ceil = 100
 
         print(f"Noise particles formula: {N_noise}")
         TURN_CEIL = 0.10745999999999996
@@ -125,7 +128,7 @@ class ParticleFilter:
 
         print(f"Curve ratio {curve_ratio}")
         if curve_ratio > 0: 
-            N_noise = 100 + (ceil-100)*curve_ratio # set a ceiling of 1000 and floor of 100 noise particles
+            N_noise = 25 + (ceil-25)*curve_ratio # set a ceiling of 1000 and floor of 100 noise particles
 
         N_noise = int(N_noise)
         print(f"Noise particles after curve: {N_noise}")
@@ -150,9 +153,8 @@ class ParticleFilter:
         denom = 24 - (16*curve_ratio)
         max_turn = np.pi / denom
 
-        # Generate noise particles in direction of our hint
+        # Generate noise particles around where combining range1 and range2 puts us
 
-        dv(self.pose[:O], self.pose[:O]+hint, color='blue')
 
         for _ in range(N_noise):
             i = random.randint(0, self.N-1) # Pick a random particle to permute
@@ -162,7 +164,7 @@ class ParticleFilter:
 
                 self.particles[i,X] += r * np.cos(theta)
                 self.particles[i,Y] += r * np.sin(theta)
-                self.particles[i,:O] += (r)*hint # All noise particles get bumped towards the direction of the GT line
+                # self.particles[i,:O] += (r)*hint # All noise particles get bumped towards the direction of the GT line
                 self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
         self.show_particles()

@@ -63,12 +63,13 @@ for i in range(1,3):
 # Originally had this set to 300 -> one slam every 3000ms
 range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
 # This frequency makes a big impact on how long we can track the pose with ground truth
-SLAM_T = 1800
+SLAM_T = 1000 
 
 
 for i in range(1,2):
     # approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    estimated_pose = run_original_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+    # estimated_pose = run_original_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
     # estimated_pose = run_antcolony_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+    estimated_pose = run_dual_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
 
     # write_pose_data_TUM(f"R{i}_alg1", estimated_pose) #TODO: Comment back in when you want to use evo

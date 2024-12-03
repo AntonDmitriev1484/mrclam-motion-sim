@@ -23,6 +23,12 @@ def unit(v):
 def rad_between_vec(v_1, v_2):
     return np.arccos(dot(v_1, v_2) / (norm(v_1)*norm(v_2)))
 
+
+def normal_pdf(x, mean, std_dev):
+    """Calculates the Gaussian probability density function for a given value x."""
+    exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
+    return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
+
 DBG = False
 def dv(start, end, label=None, color='000000'):
     end = end-start
