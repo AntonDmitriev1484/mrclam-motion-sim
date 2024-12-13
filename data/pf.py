@@ -224,40 +224,58 @@ class ParticleFilter2:
     def measurement(self, uwb_ref, uwb_range, seg_curvature):
         TURN_CEIL = 0.10745999999999996
         curve_ratio = (seg_curvature/TURN_CEIL)
-        delta_B = 10 * (curve_ratio)
+        delta_B = 4 * (curve_ratio)
         B = 5 + int(delta_B)
-        noise_limit = 0.05 + 0.4*(curve_ratio)
+        noise_limit = 0.05 + 0.1*(curve_ratio)
         print(f"B {B} noise_limit {noise_limit}")
         # Do we want to change B or noise limit?
         def perturb(particles, x_lim, y_lim):
             particles[:,X] += random.uniform(-x_lim, x_lim)
             particles[:,Y] += random.uniform(-y_lim, y_lim)
-            var_o = np.pi/12
-            particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
+            # var_o = np.pi/12
+            # particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
             return particles
         
         sum_particle_weight = np.sum(self.particles[:,W])
 
         particles_replaced_count = 0
 
+        self.norm_particles() ### Added this here don't know what it does!
+
         for i in range(self.N):
 
             v_particles = np.zeros((B, self.particles.shape[1]))
             v_particles[:] = self.particles[i]
+
             norm_weight = self.particles[i,W] / sum_particle_weight
+
             noise = noise_limit * (1-norm_weight)
+
             # print(f"Perturbing with noise {noise}")
             v_particles = perturb(v_particles, noise, noise)
 
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-            p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.01)
+            p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.1) # THIS WAS WRONG THE WHOLE TIME LOL!
+
+            # print(f"p_uwb {p_uwb} curve_ratio {curve_ratio}")
+            # SOmething like this
+            # max = p_uwb
+            # min = self.particles[i,W]*p_uwb
+            # delta = min + curve_ratio*(max - min)
+            # self.particles[i, W] = delta
             self.particles[i, W] *= p_uwb
+            # print(f"curve_ratio {curve_ratio} -> delta {delta}")
 
             for j in range(B):
                 pos = v_particles[j,[X,Y]]
                 dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
                 p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.01)
+
+                # max = p_uwb
+                # min = v_particles[j, W]*p_uwb
+                # delta = min + curve_ratio*(max - min)
+                # v_particles[j, W] = delta
                 v_particles[j, W] *= p_uwb
                 # If the weight of our virtual particle is greater, replace our original with it
                 if v_particles[j,W] > self.particles[i,W]: 

@@ -145,9 +145,9 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    # dbg_end = 300 * 100
-    dbg_end = 120 * 100
-    dbg_view_T = 10 * 100
+    dbg_end = 300 * 100
+    # dbg_end = 120 * 100
+    dbg_view_T = 10*100
 
     hint_imu = np.array([all_gt_pose[robot_id][0].x, all_gt_pose[robot_id][0].y, 0])
     hint_T = 3*range_T
