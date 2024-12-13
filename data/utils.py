@@ -52,6 +52,12 @@ def dparticle_weights(particles):
     xs, ys = particles[:,X], particles[:,Y]
     plt.scatter(xs, ys, c=weights_colors, cmap='plasma', s=10)
 
+    
+def normal_pdf(x, mean, std_dev):
+    """Calculates the Gaussian probability density function for a given value x."""
+    exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
+    return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
+
 
 def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
     UWB_range = np.linalg.norm(ref_pose - true_pose)

@@ -119,8 +119,8 @@ class DualMeasurementParticleFilter:
     def resample(self, seg_curvature):
 
         print("Resampling")
-        N_noise = 100
-        ceil = 100
+        N_noise = 1000
+        ceil = 1000
 
         print(f"Noise particles formula: {N_noise}")
         TURN_CEIL = 0.10745999999999996
