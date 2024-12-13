@@ -149,6 +149,9 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     dbg_end = 120 * 100
     dbg_view_T = 10 * 100
 
+    hint_imu = np.array([all_gt_pose[robot_id][0].x, all_gt_pose[robot_id][0].y, 0])
+    hint_T = 3*range_T
+
     sum_delta_angle = 0
 
     estimated_poses = []
@@ -174,21 +177,31 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
-            pf.measurement(ref_pos, norm(v_uwb))
+            pf.measurement(ref_pos, norm(v_uwb), sum_delta_angle)
 
             estimate = pf.estimate()
-
             estimated_poses.append(estimate)
             
             if pf.need_resample(sum_delta_angle): 
-                # v_uwb2 = true_pos - ref_pos2
-                # pf.dual_measurement(ref_pos, norm(v_uwb), ref_pos2, norm(v_uwb2))
                 pf.resample()
                 resample_count+=1
-            # Now rotate the segment to meet this estimate
 
             sum_delta_angle = 0
             range_count+=1
+
+            
+            if t % hint_T ==0:
+                # I suspect the estimate orientation we're outputting is wrong
+                # Because orientation has no tie to the actual state estimation
+                # So thats why the hint_imu point is starting so far out.
+                # we could do estimate[t] - estimate[t-1] to figure out the orientation to start integrating at
+                # l = 0.05
+                # vec_ori_est = [estimate[X] + l*math.cos(estimate[O]) , estimate[Y] + l*math.sin(estimate[O])]
+                # dv(estimate[[X,Y]], vec_ori_est)
+                # dv(hint_imu[[X,Y]], estimate[[X,Y]]) # This is a pass by reference apparently
+                # est_vec = estimated_poses[len(estimated_poses)-1] - estimated_poses[len(estimated_poses)-2]
+                hint_imu = np.copy(estimate)
+
         else:
             # Otherwise perform regular imu integration
             i = t%range_T
@@ -202,8 +215,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             do = (vo.av) * dT
             cur_pose = State(prev_pose.x + dx, prev_pose.y + dy, prev_pose.o + do)
 
+            delta = [vo.fv * dT * math.cos(hint_imu[[O]]), vo.fv * dT * math.sin(hint_imu[[O]]) , (vo.av) * dT]
+            hint_imu[[X,Y,O]] += delta
+
+            # dp(hint_imu[[X,Y]], color='orange')
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
+
 
         # if t % dbg_view_T ==0:
         #     dparticle_weights(pf.particles)

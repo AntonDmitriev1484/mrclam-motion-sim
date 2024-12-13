@@ -29,10 +29,10 @@ def normal_pdf(x, mean, std_dev):
     exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
     return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
 
-DBG = False
+DBG = True
 def dv(start, end, label=None, color='000000'):
-    end = end-start
-    if DBG: plt.arrow(start[0], start[1], end[0], end[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
+    end2 = end-start
+    if DBG: plt.arrow(start[0], start[1], end2[0], end2[1], color=color, label=label, head_width=0.001, head_length=0.001, width=0.0001)
 
 def dp(pos, label=None, color='000000'):
     if DBG: return plt.scatter(pos[0], pos[1], color=color, label=label,  s=10)

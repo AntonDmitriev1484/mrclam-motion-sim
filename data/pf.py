@@ -221,13 +221,19 @@ class ParticleFilter2:
 
 
     # Virtual particle re-sampling
-    def measurement(self, uwb_ref, uwb_range):
-        B = 5
-        noise_limit = 0.05
-        
+    def measurement(self, uwb_ref, uwb_range, seg_curvature):
+        TURN_CEIL = 0.10745999999999996
+        curve_ratio = (seg_curvature/TURN_CEIL)
+        delta_B = 10 * (curve_ratio)
+        B = 5 + int(delta_B)
+        noise_limit = 0.05 + 0.4*(curve_ratio)
+        print(f"B {B} noise_limit {noise_limit}")
+        # Do we want to change B or noise limit?
         def perturb(particles, x_lim, y_lim):
             particles[:,X] += random.uniform(-x_lim, x_lim)
             particles[:,Y] += random.uniform(-y_lim, y_lim)
+            var_o = np.pi/12
+            particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
             return particles
         
         sum_particle_weight = np.sum(self.particles[:,W])
