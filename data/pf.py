@@ -179,9 +179,9 @@ class ParticleFilter2:
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
-        r_dist = 0.25 # maximum distance of a particlef from start is 1/4meter in any direction
+        r_dist = 0.125 # maximum distance of a particlef from start is 1/4meter in any direction
         # Slightly less hallucination with 0.5
-        max_turn = np.pi / 8
+        max_turn = np.pi / 24
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(self.N):
@@ -218,8 +218,6 @@ class ParticleFilter2:
             self.particles[i, X] += dx
             self.particles[i, Y] += dy
 
-
-
     # Virtual particle re-sampling
     def measurement(self, uwb_ref, uwb_range, seg_curvature):
         TURN_CEIL = 0.10745999999999996
@@ -249,12 +247,9 @@ class ParticleFilter2:
         # More likely to drift on a harder curve, so we add more searching power to our low weight particles
 
         def noise_func(w):
-            if center_weight == 0: 
-                return 0.05
-            
+            if center_weight == 0: return 0.05
             left_bound = 0
             right_bound = 1
-
             m_left = noise_limit / (0+center_weight)
             m_right = - noise_limit / (1-center_weight)
             if (w >= center_weight):
@@ -262,42 +257,32 @@ class ParticleFilter2:
             if (w < center_weight):
                 return m_left * (w)
 
-        print(f"center_weight {center_weight}")
         # More curve, means add more variance further out
         # Less curve means add variance further in
 
         for i in range(self.N):
-
             v_particles = np.zeros((B, self.particles.shape[1]))
             v_particles[:] = self.particles[i]
-
             norm_weight = self.particles[i,W] / sum_particle_weight
-
             # noise = noise_func(norm_weight)
             noise = noise_limit * (1 - norm_weight) # Default noise function
-
-            # print(f"Center {center_weight} , Weight {norm_weight}, Perturbing with noise {noise}")
             v_particles = perturb(v_particles, noise, noise)
 
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-            # p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.1)
-            # if (p_uwb > 1): print(f"p_uwb {p_uwb}")
 
             p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
-            # print(f" p_uwb {p_uwb}")
             self.particles[i, W] = p_uwb
 
-            # for j in range(B):
-            #     pos = v_particles[j,[X,Y]]
-            #     dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-            #     p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
-
-            #     v_particles[j, W] = p_uwb
-            #     # If the weight of our virtual particle is greater, replace our original with it
-            #     if v_particles[j,W] > self.particles[i,W]: 
-            #         self.particles[i,W] = v_particles[j,W]
-            #         particles_replaced_count+=1
+            for j in range(B):
+                pos = v_particles[j,[X,Y]]
+                dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
+                p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+                v_particles[j, W] = p_uwb
+                # If the weight of our virtual particle is greater, replace our original with it
+                if v_particles[j,W] > self.particles[i,W]: 
+                    self.particles[i,W] = v_particles[j,W]
+                    particles_replaced_count+=1
 
         self.norm_particles()
         self.show_particles()

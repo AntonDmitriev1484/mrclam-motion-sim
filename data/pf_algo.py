@@ -146,8 +146,8 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # dbg_start = 40 * 100
     dbg_start = 0
     # dbg_end = 300 * 100
-    # dbg_end = 120 * 100
-    dbg_end = 80 * 100
+    dbg_end = 120 * 100
+    # dbg_end = 80 * 100
 
     dbg_view_T = 10*100
 
@@ -158,7 +158,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
-    pf = ParticleFilter2(2000) # Can't really observe behavior on 2k particles freezes plot
+    pf = ParticleFilter2(1000) # Can't really observe behavior on 2k particles freezes plot
     pf.generate(all_gt_pose[robot_id][0])
     ref_pos2 = np.array((0,-5))
     ref_pos = np.array((0,0))
