@@ -1,5 +1,8 @@
 import numpy as np
+import scipy.stats as scp
+
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 T=100
 UNCERTAIN = 0.01 # 10cm
@@ -23,6 +26,11 @@ def unit(v):
 def rad_between_vec(v_1, v_2):
     return np.arccos(dot(v_1, v_2) / (norm(v_1)*norm(v_2)))
 
+def normal_cdf(x_l, x_u, mean, std_dev):
+    p_u = scp.norm.cdf(x_u, loc=mean, scale=std_dev)
+    p_l = scp.norm.cdf(x_l, loc=mean, scale=std_dev)
+    # Super slow, might just pull a formula off the internet?
+    return p_u - p_l
 
 def normal_pdf(x, mean, std_dev):
     """Calculates the Gaussian probability density function for a given value x."""

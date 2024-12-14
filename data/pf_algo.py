@@ -145,12 +145,12 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_end = 300 * 100
+    # dbg_end = 300 * 100
     # dbg_end = 120 * 100
+    dbg_end = 80 * 100
+
     dbg_view_T = 10*100
 
-    hint_imu = np.array([all_gt_pose[robot_id][0].x, all_gt_pose[robot_id][0].y, 0])
-    hint_T = 3*range_T
 
     sum_delta_angle = 0
 
@@ -189,19 +189,6 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             sum_delta_angle = 0
             range_count+=1
 
-            
-            if t % hint_T ==0:
-                # I suspect the estimate orientation we're outputting is wrong
-                # Because orientation has no tie to the actual state estimation
-                # So thats why the hint_imu point is starting so far out.
-                # we could do estimate[t] - estimate[t-1] to figure out the orientation to start integrating at
-                # l = 0.05
-                # vec_ori_est = [estimate[X] + l*math.cos(estimate[O]) , estimate[Y] + l*math.sin(estimate[O])]
-                # dv(estimate[[X,Y]], vec_ori_est)
-                # dv(hint_imu[[X,Y]], estimate[[X,Y]]) # This is a pass by reference apparently
-                # est_vec = estimated_poses[len(estimated_poses)-1] - estimated_poses[len(estimated_poses)-2]
-                hint_imu = np.copy(estimate)
-
         else:
             # Otherwise perform regular imu integration
             i = t%range_T
@@ -215,16 +202,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             do = (vo.av) * dT
             cur_pose = State(prev_pose.x + dx, prev_pose.y + dy, prev_pose.o + do)
 
-            delta = [vo.fv * dT * math.cos(hint_imu[[O]]), vo.fv * dT * math.sin(hint_imu[[O]]) , (vo.av) * dT]
-            hint_imu[[X,Y,O]] += delta
-
             # dp(hint_imu[[X,Y]], color='orange')
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
 
-        # if t % dbg_view_T ==0:
-        #     dparticle_weights(pf.particles)
+        if t % dbg_view_T ==0:
+            dparticle_weights(pf.particles)
     # plt.show()
 
     print(f" Out of {range_count} ranges, {resample_count} were resamples")

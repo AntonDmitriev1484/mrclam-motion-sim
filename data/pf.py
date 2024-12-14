@@ -199,10 +199,10 @@ class ParticleFilter2:
         variances = np.array([var_x, var_y])
         covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
 
-        for i in range(self.N):
-            self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,[X,Y]], mean=mean_state, cov=covariance)
-        # We can also initialize it as a uniform, I think in the long term it doesn't make a big difference.
-
+        # for i in range(self.N):
+        #     self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,[X,Y]], mean=mean_state, cov=covariance)
+        # # We can also initialize it as a uniform, I think in the long term it doesn't make a big difference.
+        self.particles[:, W] = 1/self.N
         self.norm_particles()
         
     def update(self, vo):
@@ -224,9 +224,10 @@ class ParticleFilter2:
     def measurement(self, uwb_ref, uwb_range, seg_curvature):
         TURN_CEIL = 0.10745999999999996
         curve_ratio = (seg_curvature/TURN_CEIL)
-        delta_B = 4 * (curve_ratio)
-        B = 5 + int(delta_B)
-        noise_limit = 0.05 + 0.1*(curve_ratio)
+
+        B = 5
+        noise_limit = 0.1
+
         print(f"B {B} noise_limit {noise_limit}")
         # Do we want to change B or noise limit?
         def perturb(particles, x_lim, y_lim):
@@ -242,6 +243,29 @@ class ParticleFilter2:
 
         self.norm_particles() ### Added this here don't know what it does!
 
+        center_weight = 1
+        # if curve_ratio > 0 :  center_weight /= curve_ratio
+        center_weight *= curve_ratio
+        # More likely to drift on a harder curve, so we add more searching power to our low weight particles
+
+        def noise_func(w):
+            if center_weight == 0: 
+                return 0.05
+            
+            left_bound = 0
+            right_bound = 1
+
+            m_left = noise_limit / (0+center_weight)
+            m_right = - noise_limit / (1-center_weight)
+            if (w >= center_weight):
+                return noise_limit + m_right*(w-center_weight)
+            if (w < center_weight):
+                return m_left * (w)
+
+        print(f"center_weight {center_weight}")
+        # More curve, means add more variance further out
+        # Less curve means add variance further in
+
         for i in range(self.N):
 
             v_particles = np.zeros((B, self.particles.shape[1]))
@@ -249,43 +273,32 @@ class ParticleFilter2:
 
             norm_weight = self.particles[i,W] / sum_particle_weight
 
-            noise = noise_limit * (1-norm_weight)
+            # noise = noise_func(norm_weight)
+            noise = noise_limit * (1 - norm_weight) # Default noise function
 
-            # print(f"Perturbing with noise {noise}")
+            # print(f"Center {center_weight} , Weight {norm_weight}, Perturbing with noise {noise}")
             v_particles = perturb(v_particles, noise, noise)
 
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-            p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.1) # THIS WAS WRONG THE WHOLE TIME LOL!
+            # p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.1)
+            # if (p_uwb > 1): print(f"p_uwb {p_uwb}")
 
-            # print(f"p_uwb {p_uwb} curve_ratio {curve_ratio}")
-            # SOmething like this
-            # max = p_uwb
-            # min = self.particles[i,W]*p_uwb
-            # delta = min + curve_ratio*(max - min)
-            # self.particles[i, W] = delta
-            self.particles[i, W] *= p_uwb
-            # print(f"curve_ratio {curve_ratio} -> delta {delta}")
+            p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+            # print(f" p_uwb {p_uwb}")
+            self.particles[i, W] = p_uwb
 
-            for j in range(B):
-                pos = v_particles[j,[X,Y]]
-                dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-                p_uwb = normal_pdf(dist_from_ref, uwb_range, 0.01)
+            # for j in range(B):
+            #     pos = v_particles[j,[X,Y]]
+            #     dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
+            #     p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
 
-                # max = p_uwb
-                # min = v_particles[j, W]*p_uwb
-                # delta = min + curve_ratio*(max - min)
-                # v_particles[j, W] = delta
-                v_particles[j, W] *= p_uwb
-                # If the weight of our virtual particle is greater, replace our original with it
-                if v_particles[j,W] > self.particles[i,W]: 
-                    self.particles[i,W] = v_particles[j,W]
-                    particles_replaced_count+=1
+            #     v_particles[j, W] = p_uwb
+            #     # If the weight of our virtual particle is greater, replace our original with it
+            #     if v_particles[j,W] > self.particles[i,W]: 
+            #         self.particles[i,W] = v_particles[j,W]
+            #         particles_replaced_count+=1
 
-        print(f"Replaced {particles_replaced_count}/2000 particles with virtual")
-        print(f" Weights after measurement {np.sum(self.particles[:,W])}")
-        
-        # Now normalize s.t. all weights sum to 1
         self.norm_particles()
         self.show_particles()
 
@@ -310,8 +323,9 @@ class ParticleFilter2:
         neff = 1. / np.sum(np.square(weights))
         print(f" N effective particles {neff}")
         threshold = self.N/2
+        # threshold = (self.N/2) * curve_ratio
         # At a certain point we stop re-sampling?
-        return neff < 100
+        return neff < threshold
     
     def dual_measurement(self, uwb_ref1, uwb_range1, uwb_ref2, uwb_range2):
         # Re-weigh particles to 
