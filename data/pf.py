@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import integrate, interpolate
 from scipy.stats import multivariate_normal
+
 import random
 import math
 
@@ -236,16 +238,12 @@ class ParticleFilter2:
             return particles
         
         sum_particle_weight = np.sum(self.particles[:,W])
-
         particles_replaced_count = 0
-
-        self.norm_particles() ### Added this here don't know what it does!
+        self.norm_particles()
 
         center_weight = 1
-        # if curve_ratio > 0 :  center_weight /= curve_ratio
         center_weight *= curve_ratio
         # More likely to drift on a harder curve, so we add more searching power to our low weight particles
-
         def noise_func(w):
             if center_weight == 0: return 0.05
             left_bound = 0
@@ -256,9 +254,21 @@ class ParticleFilter2:
                 return noise_limit + m_right*(w-center_weight)
             if (w < center_weight):
                 return m_left * (w)
+            # More curve, means add more variance further out
+            # Less curve means add variance further in
 
-        # More curve, means add more variance further out
-        # Less curve means add variance further in
+        # Pre-integrating our normal pdf for faster cdf lookup times
+        n_samples = 4000
+        x_values = np.linspace(uwb_range-1, uwb_range+1,n_samples)
+        pdf = np.zeros(n_samples)
+        for i, distance in enumerate(x_values):
+            pdf[i] = normal_pdf(distance, uwb_range, 0.1)
+        cdf = integrate.cumulative_trapezoid(pdf, x_values, initial=0) # Integrate our pdf over the x_values
+        queryable_cdf = interpolate.interp1d(x_values, cdf, kind='linear')
+        def get_p_uwb(dist_from_ref): # Function to query our CDF
+            p_mass_upper = queryable_cdf(dist_from_ref+0.01)
+            p_mass_lower = queryable_cdf(dist_from_ref-0.01)
+            return p_mass_upper - p_mass_lower
 
         for i in range(self.N):
             v_particles = np.zeros((B, self.particles.shape[1]))
@@ -271,13 +281,15 @@ class ParticleFilter2:
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
 
-            p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+            # p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+            p_uwb = get_p_uwb(dist_from_ref)
             self.particles[i, W] = p_uwb
 
             for j in range(B):
                 pos = v_particles[j,[X,Y]]
                 dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-                p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+                # p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+                p_uwb = get_p_uwb(dist_from_ref)
                 v_particles[j, W] = p_uwb
                 # If the weight of our virtual particle is greater, replace our original with it
                 if v_particles[j,W] > self.particles[i,W]: 
