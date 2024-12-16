@@ -3,6 +3,9 @@ import scipy.stats as scp
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import random
+
+from scipy import integrate, interpolate
 
 T=100
 UNCERTAIN = 0.01 # 10cm
@@ -25,7 +28,7 @@ def unit(v):
 
 def rad_between_vec(v_1, v_2):
     return np.arccos(dot(v_1, v_2) / (norm(v_1)*norm(v_2)))
-
+    
 def normal_cdf(x_l, x_u, mean, std_dev):
     p_u = scp.norm.cdf(x_u, loc=mean, scale=std_dev)
     p_l = scp.norm.cdf(x_l, loc=mean, scale=std_dev)
@@ -60,32 +63,25 @@ def dparticle_weights(particles):
     xs, ys = particles[:,X], particles[:,Y]
     plt.scatter(xs, ys, c=weights_colors, cmap='plasma', s=10)
 
+def perturb(particles, x_lim, y_lim):
+    particles[:,X] += random.uniform(-x_lim, x_lim)
+    particles[:,Y] += random.uniform(-y_lim, y_lim)
+    # var_o = np.pi/12
+    # particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
+    return particles
+
+def build_p_uwb_func(uwb_range, UWB_ERROR):
+    n_samples = 4000
+    x_values = np.linspace(uwb_range-1, uwb_range+1,n_samples)
+    pdf = np.zeros(n_samples)
+    for i, distance in enumerate(x_values):
+        pdf[i] = normal_pdf(distance, uwb_range, UWB_ERROR)
+    cdf = integrate.cumulative_trapezoid(pdf, x_values, initial=0) # Integrate our pdf over the x_values
+    queryable_cdf = interpolate.interp1d(x_values, cdf, kind='linear', bounds_error=False, fill_value=0)
     
-def normal_pdf(x, mean, std_dev):
-    """Calculates the Gaussian probability density function for a given value x."""
-    exponent = -((x - mean) ** 2) / (2 * std_dev ** 2)
-    return (1 / (np.sqrt(2 * np.pi) * std_dev)) * np.exp(exponent)
-
-
-def trig_approx(ref_pose, true_pose, imu_pose, imu_dir, seg_delta_angle, plt=None):
-    UWB_range = np.linalg.norm(ref_pose - true_pose)
-
-    v_0 = imu_pose - ref_pose
-    v_UWB = UWB_range * (v_0 / np.linalg.norm(v_0))
-
-    v_UWBR = rotate_vector(v_UWB,+90) # Check signage
-    A=unit(dot(imu_dir,v_UWBR))
-    B=-unit(dot(imu_dir,v_UWB))
-    S=rotate_vector(imu_dir,A*B*90)
-    # I think if I take this approach further it might start messing up
-
-    # R = rotate_vector(v_UWB,+90)
-    # L = rotate_vector(v_UWB,-90)
-    # if dot(R, imu_dir) >= 0:
-    #     S = rotate_vector(imu_dir, +90)
-    # else:
-    #     S=rotate_vector(imu_dir, -90)
-
-    # dv(imu_pose, imu_pose + 10*S, color='red')
-    # S = np.dot(rotate_vector(v_UWB, 90), imu_dir) / np.linalg.norm(np.dot(rotate_vector(v_UWB, 90), imu_dir))
-    return S
+    def get_p_uwb(dist_from_ref): # Function to query our CDF
+        p_mass_upper = queryable_cdf(dist_from_ref+0.01)
+        p_mass_lower = queryable_cdf(dist_from_ref-0.01)
+        return p_mass_upper - p_mass_lower
+    
+    return get_p_uwb

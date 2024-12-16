@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import integrate, interpolate
 from scipy.stats import multivariate_normal
 
 import random
@@ -175,15 +174,17 @@ class ParticleFilter2:
         self.N = n_particles
         self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
         self.particles_over_t = []
+        self.max_tail = 0.75
+        self.furthest_on_tail = 0
 
     def norm_particles(self):
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
         # Radius of x,y s in our Gaussian multivariate
-        r_dist = 0.125 # maximum distance of a particlef from start is 1/4meter in any direction
+        r_dist = 0.2 # maximum distance of a particlef from start is 1/4meter in any direction
         # Slightly less hallucination with 0.5
-        max_turn = np.pi / 24
+        max_turn = np.pi / 12
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(self.N):
@@ -193,49 +194,34 @@ class ParticleFilter2:
             self.particles[i,Y] = start_pose.y + r * np.sin(theta)
             self.particles[i,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
 
-        var_x = np.var( self.particles[:,X], axis=0)
-        var_y = np.var( self.particles[:,Y], axis=0)
-        # So for NUMPY, you actually have to use the [ , ] in all scenarios for proper slicing
-
-        mean_state = np.mean(self.particles[:,[X,Y]], axis=0)
-        variances = np.array([var_x, var_y])
-        covariance = np.diag(variances) # Create a cov matrix assuming no cross-correlations
-
-        # for i in range(self.N):
-        #     self.particles[i,W] =  multivariate_normal.pdf(self.particles[i,[X,Y]], mean=mean_state, cov=covariance)
-        # # We can also initialize it as a uniform, I think in the long term it doesn't make a big difference.
         self.particles[:, W] = 1/self.N
         self.norm_particles()
         
     def update(self, vo):
-        # Update each particle according to visual odometry measurement
+        # Update each particle according to robot odometry measurement
         dT = 1/T
         for i in range(self.N):
-
             do = (vo.av) * dT
             self.particles[i, O] += do
-        
             dy = vo.fv * dT * math.sin(self.particles[i, O])         # sin = O/H
             dx = vo.fv * dT * math.cos(self.particles[i, O])        # cos = A/H
             self.particles[i, X] += dx
             self.particles[i, Y] += dy
 
+            # dist_on_tail = norm(self.particles[i,[X,Y]] - self.pose[[X,Y]])
+            # if dist_on_tail > self.furthest_on_tail: self.furthest_on_tail = dist_on_tail
+
+
     # Virtual particle re-sampling
     def measurement(self, uwb_ref, uwb_range, seg_curvature):
         TURN_CEIL = 0.10745999999999996
         curve_ratio = (seg_curvature/TURN_CEIL)
-
+        UWB_ERROR = 0.1 # Error is 10cm
         B = 5
         noise_limit = 0.1
 
         print(f"B {B} noise_limit {noise_limit}")
         # Do we want to change B or noise limit?
-        def perturb(particles, x_lim, y_lim):
-            particles[:,X] += random.uniform(-x_lim, x_lim)
-            particles[:,Y] += random.uniform(-y_lim, y_lim)
-            # var_o = np.pi/12
-            # particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
-            return particles
         
         sum_particle_weight = np.sum(self.particles[:,W])
         particles_replaced_count = 0
@@ -257,38 +243,27 @@ class ParticleFilter2:
             # More curve, means add more variance further out
             # Less curve means add variance further in
 
-        # Pre-integrating our normal pdf for faster cdf lookup times
-        n_samples = 4000
-        x_values = np.linspace(uwb_range-1, uwb_range+1,n_samples)
-        pdf = np.zeros(n_samples)
-        for i, distance in enumerate(x_values):
-            pdf[i] = normal_pdf(distance, uwb_range, 0.1)
-        cdf = integrate.cumulative_trapezoid(pdf, x_values, initial=0) # Integrate our pdf over the x_values
-        queryable_cdf = interpolate.interp1d(x_values, cdf, kind='linear')
-        def get_p_uwb(dist_from_ref): # Function to query our CDF
-            p_mass_upper = queryable_cdf(dist_from_ref+0.01)
-            p_mass_lower = queryable_cdf(dist_from_ref-0.01)
-            return p_mass_upper - p_mass_lower
+        # Pre-integrating our normal pdf for faster cdf lookup times 
+        get_p_uwb = build_p_uwb_func(uwb_range, UWB_ERROR)
 
         for i in range(self.N):
             v_particles = np.zeros((B, self.particles.shape[1]))
             v_particles[:] = self.particles[i]
             norm_weight = self.particles[i,W] / sum_particle_weight
-            # noise = noise_func(norm_weight)
-            noise = noise_limit * (1 - norm_weight) # Default noise function
+            noise = noise_func(norm_weight)
+            # noise = noise_limit * (1 - norm_weight) # Default noise function
             v_particles = perturb(v_particles, noise, noise)
 
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
 
-            # p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
             p_uwb = get_p_uwb(dist_from_ref)
             self.particles[i, W] = p_uwb
 
             for j in range(B):
                 pos = v_particles[j,[X,Y]]
                 dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-                # p_uwb = normal_cdf(dist_from_ref-0.01, dist_from_ref+0.01, uwb_range, 0.1)
+                
                 p_uwb = get_p_uwb(dist_from_ref)
                 v_particles[j, W] = p_uwb
                 # If the weight of our virtual particle is greater, replace our original with it
@@ -311,6 +286,14 @@ class ParticleFilter2:
         self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
         return self.pose
     
+    def need_crop(self):
+        too_wide = self.furthest_on_tail > self.max_tail
+        return too_wide
+    
+    def cropping_resample(self):
+        self.furthest_on_tail = 0
+
+    
     def need_resample(self, seg_curvature): # Calculate effective n to determine if we need to resample
         self.norm_particles()
         TURN_CEIL = 0.10745999999999996
@@ -324,17 +307,6 @@ class ParticleFilter2:
         # At a certain point we stop re-sampling?
         return neff < threshold
     
-    def dual_measurement(self, uwb_ref1, uwb_range1, uwb_ref2, uwb_range2):
-        # Re-weigh particles to 
-        for i in range(self.N):
-            pos = self.particles[i,[X,Y]]
-            d_ref1 = norm(pos - uwb_ref1)
-            d_ref2 = norm(pos - uwb_ref2)
-            self.particles[i, W] = normal_pdf(d_ref1, uwb_range1, UNCERTAIN) * normal_pdf(d_ref2, uwb_range2, UNCERTAIN)
-
-        self.norm_particles()
-        self.show_particles()
-
     def resample(self):
         print(f"Resampling")
         cumulative_sum = np.cumsum(self.particles[:,W])
@@ -343,13 +315,14 @@ class ParticleFilter2:
         # Generate N random numbers. Search for the cumulative desnities spots (particles) that are closest to that random number
         replace = self.particles[indexes]
         self.particles[:,[X,Y]] = replace[:,[X,Y]]         # resample according to indexes
-        self.particles[:,W] = 1.0/self.N 
+        self.particles[:,W] = 1.0/self.N
 
-        # Generate noise particles in direction of our hint
+        # A bit of roughening
+        roughen_indexes = np.random.randint(0, self.N, (int(self.N/3)))
+        self.particles[[roughen_indexes]] = perturb(self.particles[[roughen_indexes]], 0.05, 0.05)
+        max_turn = np.pi / 12
+        for i in roughen_indexes:
+            self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
-        # for _ in range(N_noise):
-        #     i = random.randint(0, self.N-1) # Pick a random particle to permute
-        #     if not (i in indexes): # If this is not one of our important points
-        #         self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
         self.show_particles()

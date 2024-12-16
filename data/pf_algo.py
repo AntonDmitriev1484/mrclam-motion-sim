@@ -136,7 +136,6 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     dT = 1/T
     sim_time = min( [len(all_gt_pose[0]), len(all_gt_pose[1]) ] )
 
-    ref_pos = np.array((0,0))
     start_pose = all_gt_pose[robot_id][0] #starts at ground truth
     imu_segment = [ State(0,0,0) for i in range(0, range_T)] # An array of States
     imu_segment[0] = State(start_pose.x, start_pose.y, start_pose.orientation)
@@ -145,11 +144,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
+    dbg_start = 100 * 100
+    dbg_end = 200 * 100
     # dbg_end = 300 * 100
-    dbg_end = 120 * 100
+    # dbg_end = 120 * 100
     # dbg_end = 80 * 100
 
-    dbg_view_T = 10*100
+    dbg_view_T = 15*100
 
 
     sum_delta_angle = 0
@@ -158,7 +159,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
-    pf = ParticleFilter2(1000) # Can't really observe behavior on 2k particles freezes plot
+    pf = ParticleFilter2(1000)
     pf.generate(all_gt_pose[robot_id][0])
     ref_pos2 = np.array((0,-5))
     ref_pos = np.array((0,0))
