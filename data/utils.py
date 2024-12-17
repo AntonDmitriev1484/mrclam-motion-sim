@@ -14,6 +14,11 @@ X, Y, O, W = (0,1,2,3)
 def rotate_segment(imu_segment):
     return None
 
+def rotation_matrix(theta):
+    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                                [np.sin(theta),  np.cos(theta)]])
+    return rotation_matrix
+
 def rotate_vector(vector, degrees):
     r = np.radians(degrees)
     rotation_matrix = np.array([[np.cos(r), -np.sin(r)],
@@ -69,6 +74,22 @@ def perturb(particles, x_lim, y_lim):
     # var_o = np.pi/12
     # particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
     return particles
+
+# center_weight = 1
+# center_weight *= curve_ratio
+# # More likely to drift on a harder curve, so we add more searching power to our low weight particles
+# def custom_noise_func(w):
+#     if center_weight == 0: return 0.05
+#     left_bound = 0
+#     right_bound = 1
+#     m_left = noise_limit / (0+center_weight)
+#     m_right = - noise_limit / (1-center_weight)
+#     if (w >= center_weight):
+#         return noise_limit + m_right*(w-center_weight)
+#     if (w < center_weight):
+#         return m_left * (w)
+#     # More curve, means add more variance further out
+#     # Less curve means add variance further in
 
 def build_p_uwb_func(uwb_range, UWB_ERROR):
     n_samples = 4000

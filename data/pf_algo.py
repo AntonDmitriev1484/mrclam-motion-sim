@@ -144,13 +144,14 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_start = 100 * 100
-    dbg_end = 170 * 100
+    # dbg_start = 100 * 100
+    # dbg_end = 170 * 100
     # dbg_end = 300 * 100
-    # dbg_end = 120 * 100
-    # dbg_end = 80 * 100
+    dbg_end = 120 * 100
+    # dbg_end = 4 * range_T
 
-    dbg_view_T = 15*100
+    dbg_view_T = 10*100
+    dbg_show_particles = True
 
 
     sum_delta_angle = 0
@@ -207,9 +208,9 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
 
-
-        if t > dbg_start and t < dbg_end and t % dbg_view_T ==0:
+        if dbg_show_particles and t > dbg_start and t < dbg_end and t % dbg_view_T ==0:
             dparticle_weights(pf.particles)
+
     # plt.show()
 
     print(f" Out of {range_count} ranges, {resample_count} were resamples")
