@@ -260,11 +260,19 @@ class ParticleFilter2:
             theta_rotation = rad_between_vec([1,0], unit_v_uwb)
             R_g_to_uwb = rotation_matrix(theta_rotation)
 
-            # v_dev_uwb = dot(R_g_to_uwb, v_dev)
-            v_dev_uwb = dot(v_dev, R_g_to_uwb)
+            v_dev_uwb = dot(R_g_to_uwb, v_dev) # THIS IS THE CORRECT ORDER TRUST ME DEAR GOD
+            # v_dev_uwb = dot(v_dev, R_g_to_uwb)
 
-            sigma_uwb_x = [0, 0]
-            sigma_uwb_y = sorted([ v_dev_uwb[Y] * (0.8), v_dev_uwb[Y] * 1])
+            # dv(mean, mean+v_dev)
+            # dv(mean, mean+v_dev_uwb)
+
+            # sigma_uwb_x = [-0.1, 0.1]
+            # Push out high weighted particles along the x-axis
+            sigma_uwb_x = sorted([ -v_dev_uwb[X] * (0.1), -v_dev_uwb[X] * (0.1)])
+            sigma_uwb_y = sorted([ -v_dev_uwb[Y] * (0.1), v_dev_uwb[Y] * (0.2)])
+            # I think v_dev_uwb might be bugged and is very large
+            # sigma_uwb_y = [0, 0]
+            # sigma_uwb_x = [0,0]
 
             for j in range(B):
                 pos = Vparticles[j,[X,Y]]
@@ -278,20 +286,23 @@ class ParticleFilter2:
                 Ppos_uwb = pos_uwb + perturbation_vector
                 
                 R_uwb_to_g = R_g_to_uwb.T
-                # Ppos = dot(R_uwb_to_g, Ppos_uwb) # Perturbed position in global frame
-                Ppos = dot(Ppos_uwb, R_uwb_to_g)
+                Ppos = dot(R_uwb_to_g, Ppos_uwb) # Perturbed position in global frame
+                # Ppos = dot(Ppos_uwb, R_uwb_to_g)
                 # dv(pos, Ppos)
 
                 dist_from_ref = norm(Ppos - uwb_ref) # Now just check how this distance falls on our UWB distribution
                 
                 p_uwb = get_p_uwb(dist_from_ref)
+                Vparticles[j,[X,Y]] = Ppos
+                Vparticles[j,O] = self.particles[i,O]
                 Vparticles[j, W] = p_uwb
                 # If the weight of our virtual particle is greater, replace our original with it
                 # if Vparticles[j,W] > (self.particles[i,W] * alpha): 
-                #     self.particles[i,W] = Vparticles[j,W]
+                #     self.particles[i,:] = Vparticles[j,:]
                 #     particles_replaced_count+=1
-                self.particles[i,W] = Vparticles[j,W]
-                particles_replaced_count+=1
+                # self.particles[i,W] = Vparticles[j,W]
+                self.particles[i,:] = Vparticles[j,:]
+                # particles_replaced_count+=1
 
         self.norm_particles()
         self.show_particles()
