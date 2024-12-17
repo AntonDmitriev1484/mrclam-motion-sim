@@ -145,7 +145,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # dbg_start = 40 * 100
     dbg_start = 0
     dbg_start = 100 * 100
-    dbg_end = 200 * 100
+    dbg_end = 170 * 100
     # dbg_end = 300 * 100
     # dbg_end = 120 * 100
     # dbg_end = 80 * 100
@@ -208,7 +208,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             imu_segment[i] = cur_pose
 
 
-        if t % dbg_view_T ==0:
+        if t > dbg_start and t < dbg_end and t % dbg_view_T ==0:
             dparticle_weights(pf.particles)
     # plt.show()
 
