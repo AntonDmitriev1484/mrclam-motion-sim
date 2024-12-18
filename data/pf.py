@@ -266,10 +266,19 @@ class ParticleFilter2:
             # dv(mean, mean+v_dev)
             # dv(mean, mean+v_dev_uwb)
 
+            unit_dev = v_dev_uwb
             # sigma_uwb_x = [-0.1, 0.1]
             # Push out high weighted particles along the x-axis
-            sigma_uwb_x = sorted([ -v_dev_uwb[X] * (0.1), -v_dev_uwb[X] * (0.1)])
-            sigma_uwb_y = sorted([ -v_dev_uwb[Y] * (0.1), v_dev_uwb[Y] * (0.2)])
+            sigma_uwb_x = np.array([ -unit_dev[X] * (0.1), unit_dev[X] * (0.1)])
+            sigma_uwb_y = np.array([ -unit_dev[Y] * (0.1), unit_dev[Y] * (0.1)])
+
+
+            # sigma_uwb_x *= (1-norm_weight)
+            # y_noise_shift = 0.15
+            # sigma_uwb_y += np.array([y_noise_shift, y_noise_shift])
+            # sigma_uwb_y *= (1-norm_weight)
+
+
             # I think v_dev_uwb might be bugged and is very large
             # sigma_uwb_y = [0, 0]
             # sigma_uwb_x = [0,0]
@@ -297,11 +306,11 @@ class ParticleFilter2:
                 Vparticles[j,O] = self.particles[i,O]
                 Vparticles[j, W] = p_uwb
                 # If the weight of our virtual particle is greater, replace our original with it
-                # if Vparticles[j,W] > (self.particles[i,W] * alpha): 
-                #     self.particles[i,:] = Vparticles[j,:]
-                #     particles_replaced_count+=1
+                if Vparticles[j,W] > (self.particles[i,W] * (1-0.5*seg_curvature*alpha)): 
+                    self.particles[i,:] = Vparticles[j,:]
+                    particles_replaced_count+=1
                 # self.particles[i,W] = Vparticles[j,W]
-                self.particles[i,:] = Vparticles[j,:]
+                # self.particles[i,:] = Vparticles[j,:]
                 # particles_replaced_count+=1
 
         self.norm_particles()
