@@ -181,10 +181,26 @@ class ParticleFilter2:
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
 
     def generate(self, start_pose):
-        # Radius of x,y s in our Gaussian multivariate
-        r_dist = 0.2 # maximum distance of a particlef from start is 1/4meter in any direction
-        # Slightly less hallucination with 0.5
+        r_dist = 0.25
         max_turn = np.pi / 12
+
+        # Create states at uniform, and weight them according to 3D Gaussian
+        for i in range(self.N):
+            r = random.uniform(0, r_dist)
+            theta = random.uniform(0, 2*np.pi)
+            self.particles[i,X] = start_pose[X] + r * np.cos(theta)
+            self.particles[i,Y] = start_pose[Y] + r * np.sin(theta)
+            self.particles[i,O] = start_pose[O] + random.uniform(-max_turn , +max_turn)
+
+        self.particles[:, W] = 1/self.N
+        self.norm_particles()
+
+    
+    def loop_generate(self, pose, prev_pose):
+        r_dist = 0.25
+        start_pose = pose
+        # start_pose[O] = 
+        max_turn = np.pi / 8
 
         # Create states at uniform, and weight them according to 3D Gaussian
         for i in range(self.N):
@@ -224,10 +240,11 @@ class ParticleFilter2:
         particles_replaced_count = 0
         self.norm_particles()
 
-        center_weight = 1
-        center_weight *= curve_ratio
         # More likely to drift on a harder curve, so we add more searching power to our low weight particles
         def noise_func(w):
+            
+            center_weight = 1
+            center_weight *= curve_ratio
             if center_weight == 0: return 0.05
             left_bound = 0
             right_bound = 1
@@ -282,15 +299,7 @@ class ParticleFilter2:
     def estimate(self):
         self.pose = np.average(self.particles[:,:W] , weights = self.particles[:,W], axis = 0)
         return self.pose
-    
-    def need_crop(self):
-        too_wide = self.furthest_on_tail > self.max_tail
-        return too_wide
-    
-    def cropping_resample(self):
-        self.furthest_on_tail = 0
 
-    
     def need_resample(self, seg_curvature): # Calculate effective n to determine if we need to resample
         self.norm_particles()
         TURN_CEIL = 0.10745999999999996
@@ -299,8 +308,8 @@ class ParticleFilter2:
         weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
         # print(f" N effective particles {neff}")
-        threshold = self.N/2
-        # threshold = (self.N/2) * curve_ratio
+        # threshold = self.N/2
+        threshold = (self.N/2) * curve_ratio
         return neff < threshold
     
     def resample(self):
@@ -316,9 +325,9 @@ class ParticleFilter2:
         # A bit of roughening
         roughen_indexes = np.random.randint(0, self.N, (int(self.N/3)))
         self.particles[[roughen_indexes]] = perturb(self.particles[[roughen_indexes]], 0.05, 0.05)
-        max_turn = np.pi / 12
-        for i in roughen_indexes:
-            self.particles[i,O] += random.uniform(-max_turn , +max_turn)
+        # max_turn = np.pi / 12
+        # for i in roughen_indexes:
+        #     self.particles[i,O] += random.uniform(-max_turn , +max_turn)
 
 
         self.show_particles()

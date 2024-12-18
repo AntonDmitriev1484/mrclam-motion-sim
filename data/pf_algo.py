@@ -130,14 +130,7 @@ def run_original_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose
     return estimated_poses
 
 
-def check_loop(point, trajectory):
-    len = trajectory.shape[0]-1
-    for i in range(0, len):
-        t_point = trajectory[len-i, : ] # loop backwards through trajectory
-        dist = norm(t_point - point)
-        if ( dist < 0.1) and i < (len - 100): return True
-    return False
-    # Loop detection is wrong, detecting way too many loops fix later!
+
 
 def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # This algorithm will use a particle filter to estimate point location during each range.
@@ -154,13 +147,27 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_start = 100 * 100
-    dbg_end = 200 * 100
+    dbg_start = 170 * 100
+    dbg_end = 230 * 100
     # dbg_end = 300 * 100
     # dbg_end = 120 * 100
     # dbg_end = 80 * 100
+    dbg_show_particles = True
 
     dbg_view_T = 15*100
+
+    def check_loop(point, trajectory):
+        # Note: This would completely break if we ever loop back
+        # at an angle parallel to our past trajectory
+        # but this works for just testing
+        len = trajectory.shape[0]-1
+        for i in range(0, len-(100)):
+            t_point = trajectory[i, : ] # loop backwards through trajectory
+            dist = abs(norm(t_point - point))
+            if ( dist < 0.025):
+                return True
+        return False
+    # Loop detection is wrong, detecting way too many loops fix later!
 
 
     sum_delta_angle = 0
@@ -181,9 +188,6 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     range_count = 0
 
     for t in range(0,dbg_end):
-        # if t % SLAM_T == 0:
-        #     #TODO: Do I need to add to imu_segment here also?
-        #     estimated_poses.append(all_gt_pose[robot_id][t])
 
         if t % range_T == 0:
             # print(f" Range # {t/range_T}")
@@ -194,12 +198,19 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             pf.measurement(ref_pos, norm(v_uwb), sum_delta_angle)
 
             estimate = pf.estimate()
-            estimated_poses = np.append(estimated_poses, [estimate], axis = 0)
+
+            # Debug draw orientation vector to see where cloud is trending
+            start = estimate[[X,Y]]
+            diff = np.array([0.1*math.cos(estimate[[O]]), 0.1*math.sin(estimate[[O]])])
+            dv(estimate[[X,Y]], estimate[[X,Y]]+diff)
 
             if check_loop(estimate[[X,Y]], estimated_poses[:,[X,Y]]):
                 print(f"Loop detected at {estimate[[X,Y]]}")
-                dp(estimate[[X,Y]], color='pink')
-                pf.generate(estimate)
+                plt.scatter(estimate[[X]], estimate[[Y]], color='red',  s=50)
+                pf.loop_generate(estimated_poses[-1,:], estimated_poses[-2,:])
+                dparticle_weights(pf.particles)
+
+            estimated_poses = np.append(estimated_poses, [estimate], axis = 0)
 
             if pf.need_resample(sum_delta_angle): 
                 pf.resample()
@@ -226,7 +237,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             imu_segment[i] = cur_pose
 
 
-        if t % dbg_view_T ==0:
+        if dbg_show_particles and dbg_start < t and t % dbg_view_T ==0:
             dparticle_weights(pf.particles)
     # plt.show()
 
