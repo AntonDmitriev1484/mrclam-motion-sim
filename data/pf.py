@@ -190,9 +190,9 @@ class ParticleFilter2:
         for i in range(self.N):
             r = random.uniform(0, r_dist)
             theta = random.uniform(0, 2*np.pi)
-            self.particles[i,X] = start_pose.x + r * np.cos(theta)
-            self.particles[i,Y] = start_pose.y + r * np.sin(theta)
-            self.particles[i,O] = start_pose.orientation + random.uniform(-max_turn , +max_turn)
+            self.particles[i,X] = start_pose[X] + r * np.cos(theta)
+            self.particles[i,Y] = start_pose[Y] + r * np.sin(theta)
+            self.particles[i,O] = start_pose[O] + random.uniform(-max_turn , +max_turn)
 
         self.particles[:, W] = 1/self.N
         self.norm_particles()
@@ -219,9 +219,6 @@ class ParticleFilter2:
         UWB_ERROR = 0.1 # Error is 10cm
         B = 5
         noise_limit = 0.1
-
-        print(f"B {B} noise_limit {noise_limit}")
-        # Do we want to change B or noise limit?
         
         sum_particle_weight = np.sum(self.particles[:,W])
         particles_replaced_count = 0
@@ -250,8 +247,8 @@ class ParticleFilter2:
             v_particles = np.zeros((B, self.particles.shape[1]))
             v_particles[:] = self.particles[i]
             norm_weight = self.particles[i,W] / sum_particle_weight
-            noise = noise_func(norm_weight)
-            # noise = noise_limit * (1 - norm_weight) # Default noise function
+            # noise = noise_func(norm_weight)
+            noise = noise_limit * (1 - norm_weight) # Default noise function
             v_particles = perturb(v_particles, noise, noise)
 
             pos = self.particles[i,[X,Y]]
@@ -301,10 +298,9 @@ class ParticleFilter2:
     
         weights = self.particles[:,W]
         neff = 1. / np.sum(np.square(weights))
-        print(f" N effective particles {neff}")
+        # print(f" N effective particles {neff}")
         threshold = self.N/2
         # threshold = (self.N/2) * curve_ratio
-        # At a certain point we stop re-sampling?
         return neff < threshold
     
     def resample(self):

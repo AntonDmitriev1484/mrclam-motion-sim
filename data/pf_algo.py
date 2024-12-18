@@ -129,6 +129,16 @@ def run_original_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose
 
     return estimated_poses
 
+
+def check_loop(point, trajectory):
+    len = trajectory.shape[0]-1
+    for i in range(0, len):
+        t_point = trajectory[len-i, : ] # loop backwards through trajectory
+        dist = norm(t_point - point)
+        if ( dist < 0.1) and i < (len - 100): return True
+    return False
+    # Loop detection is wrong, detecting way too many loops fix later!
+
 def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # This algorithm will use a particle filter to estimate point location during each range.
 
@@ -155,12 +165,15 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
     sum_delta_angle = 0
 
-    estimated_poses = []
+    estimated_poses = np.zeros((1,3))
+    start_pose = all_gt_pose[robot_id][0]
+    estimated_poses[0] = np.array([start_pose.x, start_pose.y, start_pose.orientation])
+
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
 
     pf = ParticleFilter2(1000)
-    pf.generate(all_gt_pose[robot_id][0])
+    pf.generate(estimated_poses[0])
     ref_pos2 = np.array((0,-5))
     ref_pos = np.array((0,0))
 
@@ -173,7 +186,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
         #     estimated_poses.append(all_gt_pose[robot_id][t])
 
         if t % range_T == 0:
-            print(f" Range # {t/range_T}")
+            # print(f" Range # {t/range_T}")
 
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
@@ -181,8 +194,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             pf.measurement(ref_pos, norm(v_uwb), sum_delta_angle)
 
             estimate = pf.estimate()
-            estimated_poses.append(estimate)
-            
+            estimated_poses = np.append(estimated_poses, [estimate], axis = 0)
+
+            if check_loop(estimate[[X,Y]], estimated_poses[:,[X,Y]]):
+                print(f"Loop detected at {estimate[[X,Y]]}")
+                dp(estimate[[X,Y]], color='pink')
+                pf.generate(estimate)
+
             if pf.need_resample(sum_delta_angle): 
                 pf.resample()
                 resample_count+=1
@@ -218,7 +236,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     plt.ylabel('Y (m)')
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
-    x, y = ([p[0] for p in estimated_poses[:dbg_end]] , [p[1] for p in estimated_poses[:dbg_end]])
+    x, y = (estimated_poses[:,X], estimated_poses[:,Y])
     plt.scatter(x, y, c='blue', s=10)
     
     x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
