@@ -28,7 +28,14 @@ def pose_to_TUM(pose):
     # NOTE: Hardcoded to Centiseconds, need to convert back to seconds for TUM format
     return TUMPose(float(pose.time)/100, pose.x, pose.y, 0, quat[0], quat[1], quat[2], quat[3])
 
+def pose_to_TUM_epic(pose):
+    # In robot case we're only rotation about Z-axis, so we change yaw
+    quat = R.from_euler('xyz', [0, 0, pose.orientation]).as_quat()
+    # NOTE: Hardcoded to Centiseconds, need to convert back to seconds for TUM format
+    return TUMPose(float(pose.time), pose.x, pose.y, 0, quat[0], quat[1], quat[2], quat[3])
+
 def write_pose_data_TUM(filename, pose_data):
+    print(f"Writing data for {filename}")
     with open(f"{DATA_DIR}/eval_dataset/{filename}.txt", 'w', newline='') as file:
         writer = csv.writer(file, delimiter=' ')
         file.write("# timestamp tx ty tz qx qy qz qw\n") #THIS FUCKING COMMENT WASTED 1 HOUR OF MY LIFE

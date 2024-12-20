@@ -147,12 +147,14 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # Segment from 1 to 1.5 minutes has problems
     # dbg_start = 40 * 100
     dbg_start = 0
-    dbg_start = 170 * 100
-    dbg_end = 230 * 100
+    dbg_start = 0 * 100
+    # dbg_end = 5*100
+    # dbg_end = 120 * 100
     # dbg_end = 300 * 100
+    dbg_end = 300 * 100
     # dbg_end = 120 * 100
     # dbg_end = 80 * 100
-    dbg_show_particles = True
+    dbg_show_particles = False
 
     dbg_view_T = 15*100
 
@@ -175,6 +177,10 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     estimated_poses = np.zeros((1,3))
     start_pose = all_gt_pose[robot_id][0]
     estimated_poses[0] = np.array([start_pose.x, start_pose.y, start_pose.orientation])
+    
+    full_poses = np.zeros((1,4))
+    full_poses[0] = np.array([0, start_pose.x, start_pose.y, start_pose.orientation])
+    prev_pf_pose = full_poses[0]
 
     S_vectors = []
     trig_estimated_poses = [] # trig approx poses based on particle filter estimates
@@ -187,10 +193,12 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     resample_count = 0
     range_count = 0
 
+    timer = 0
+
     for t in range(0,dbg_end):
 
         if t % range_T == 0:
-            # print(f" Range # {t/range_T}")
+            print(f" Range # {t/range_T}")
 
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
@@ -198,19 +206,27 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             pf.measurement(ref_pos, norm(v_uwb), sum_delta_angle)
 
             estimate = pf.estimate()
+            prev_pf_pose = estimate
 
             # Debug draw orientation vector to see where cloud is trending
             start = estimate[[X,Y]]
             diff = np.array([0.1*math.cos(estimate[[O]]), 0.1*math.sin(estimate[[O]])])
-            dv(estimate[[X,Y]], estimate[[X,Y]]+diff)
+            # dv(estimate[[X,Y]], estimate[[X,Y]]+diff)
 
-            if check_loop(estimate[[X,Y]], estimated_poses[:,[X,Y]]):
-                print(f"Loop detected at {estimate[[X,Y]]}")
-                plt.scatter(estimate[[X]], estimate[[Y]], color='red',  s=50)
-                pf.loop_generate(estimated_poses[-1,:], estimated_poses[-2,:])
-                dparticle_weights(pf.particles)
+            # if check_loop(estimate[[X,Y]], estimated_poses[:,[X,Y]]):
+            #     print(f"Loop detected at {estimate[[X,Y]]}")
+
+            #     dual_uwb_measurement_point = true_pos 
+            #     # Suppose that when we detect a loop closure, 
+            #     # we request a dualateration measurement, from an agent or anchor with accurate pose
+            #     # So that we re-generate our particles properly atop groundtruth
+
+            #     plt.scatter(dual_uwb_measurement_point[X], dual_uwb_measurement_point[Y], color='red',  s=50)
+            #     pf.loop_generate(estimated_poses[-1,:], estimated_poses[-2,:])
+                # dparticle_weights(pf.particles)
 
             estimated_poses = np.append(estimated_poses, [estimate], axis = 0)
+            full_poses = np.append(full_poses, np.array([np.array([t, estimate[0], estimate[1], estimate[2]])]), axis = 0)
 
             if pf.need_resample(sum_delta_angle): 
                 pf.resample()
@@ -218,6 +234,7 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
             sum_delta_angle = 0
             range_count+=1
+            timer-=1
 
         else:
             # Otherwise perform regular imu integration
@@ -232,6 +249,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             do = (vo.av) * dT
             cur_pose = State(prev_pose.x + dx, prev_pose.y + dy, prev_pose.o + do)
 
+            # Blows up because prev_pose is imu_segment
+
+            zzz = prev_pf_pose + np.array([dx, dy, do])
+            asdf = np.array([np.array([t, zzz[X], zzz[Y], zzz[O]])])
+            full_poses = np.append(full_poses, asdf, axis = 0)
+            prev_pf_pose = zzz
+
             # dp(hint_imu[[X,Y]], color='orange')
             sum_delta_angle += abs(do) # don't care about signage, just want to capture how windy this segment is
             imu_segment[i] = cur_pose
@@ -245,23 +269,24 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
     plt.xlabel('X (m)')
     plt.ylabel('Y (m)')
+    plt.title(f'Robot trajectory for t={dbg_end/(100)} seconds')
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
-    x, y = (estimated_poses[:,X], estimated_poses[:,Y])
-    plt.scatter(x, y, c='blue', s=10)
+    # x, y = (estimated_poses[:,X], estimated_poses[:,Y])
+    # plt.scatter(x, y, c='blue', s=10)
     
-    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
-    plt.scatter(x, y, c='green', s=1)
-
-    # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
+    # x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
     # plt.scatter(x, y, c='green', s=1)
-    x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
-    plt.scatter(x, y, c='red', s=1)
 
-    plt.show()
-    # plt.savefig('paths.png')
+    # # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
+    # # plt.scatter(x, y, c='green', s=1)
+    # x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
+    # plt.scatter(x, y, c='red', s=1)
 
-    return estimated_poses
+    # plt.show()
+
+    # return estimated_poses
+    return full_poses
 
 def run_antcolony_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # This algorithm will use a particle filter to estimate point location during each range.

@@ -197,7 +197,7 @@ class ParticleFilter2:
 
     
     def loop_generate(self, pose, prev_pose):
-        r_dist = 0.25
+        r_dist = 0.5
         start_pose = pose
         # start_pose[O] = 
         max_turn = np.pi / 8

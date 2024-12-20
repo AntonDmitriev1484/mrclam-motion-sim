@@ -30,7 +30,7 @@ all_mes_vo = [ [] for i in range(1,6) ]
 all_mes_pose = [ [] for i in range(1,6) ]
 
 
-for i in range(1,3):
+for i in range(1,2):
     gt_pose_df, vo_df = load_MRCLAM(1, i)
     gt_pose_df, vo_df = crop_data(gt_pose_df, vo_df)
 
@@ -45,31 +45,39 @@ for i in range(1,3):
     all_mes_vo[i-1] = mes_vo
 
     # SLAM_T = 30 # default edgeSLAM runtime is between 200 to 300ms
-    fSLAM_pose = measured_vo_to_fakeSLAM(gt_pose, mes_pose, mes_vo, 1000, T) # Run "SLAM" every 20 cs
+    # fSLAM_pose = measured_vo_to_fakeSLAM(gt_pose, mes_pose, mes_vo, 1000, T) # Run "SLAM" every 20 cs
 
     # write_pose_data(f"R{i}_mes", mes_pose)
     # write_pose_data(f"R{i}_gt", gt_pose)
     # write_pose_data(f"R{i}_fSLAM", fSLAM_pose)
 
-    # write_pose_data_TUM(f"R{i}_mes", mes_pose)
+    debug_crop = 300*100
+    write_pose_data_TUM(f"R{i}_mes", mes_pose[:debug_crop])
     # write_pose_data_TUM(f"R{i}_gt", gt_pose[:1000])
-    debug_crop = 120*100
     write_pose_data_TUM(f"R{i}_gt", gt_pose[:debug_crop])
     # write_pose_data_TUM(f"R{i}_fSLAM", fSLAM_pose)
 
+    # Originally had this set to 300 -> one slam every 3000ms
+    range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
+    # This frequency makes a big impact on how long we can track the pose with ground truth
+    SLAM_T = 1500 
+    estimated = run_pf2(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+    estimated_pose_as_pose_tuple = [ Pose(estimated[i, 0], estimated[i, 1], estimated[i, 2], estimated[i,3]) for i in range(estimated.shape[0])]
+    for j in range(5):
+        print(estimated_pose_as_pose_tuple[j].time)
+    
+    write_pose_data_TUM(f"R{i}_pf", estimated_pose_as_pose_tuple) #TODO: Comment back in when you want to use evo
 
 
 
-# Originally had this set to 300 -> one slam every 3000ms
-range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
-# This frequency makes a big impact on how long we can track the pose with ground truth
-SLAM_T = 1500 
 
 
-for i in range(1,2):
-    # approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    # estimated_pose = run_original_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    # estimated_pose = run_antcolony_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    # estimated_pose = run_dual_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    estimated_pose = run_pf2(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
-    # write_pose_data_TUM(f"R{i}_alg1", estimated_pose) #TODO: Comment back in when you want to use evo
+
+# for i in range(1,2):
+#     # approx_pose =  measured_vo_to_algo1(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+#     # estimated_pose = run_original_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+#     # estimated_pose = run_antcolony_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+#     # estimated_pose = run_dual_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+#     estimated = run_pf2(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+#     estimated_pose_as_pose_tuple = [ Pose(0, estimated[i, 0], estimated[i, 1], estimated[i, 2]) for i in range(estimated.shape[0])]
+#     write_pose_data_TUM(f"R{i}_pf", estimated_pose_as_pose_tuple) #TODO: Comment back in when you want to use evo
