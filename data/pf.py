@@ -174,8 +174,6 @@ class ParticleFilter2:
         self.N = n_particles
         self.particles = np.zeros((n_particles, 4)) # n_particles rows, 4 columns
         self.particles_over_t = []
-        self.max_tail = 0.75
-        self.furthest_on_tail = 0
 
     def norm_particles(self):
         self.particles[:,W] = self.particles[:,W] / np.sum(self.particles[:,W])
@@ -208,22 +206,41 @@ class ParticleFilter2:
             self.particles[i, X] += dx
             self.particles[i, Y] += dy
 
-            # dist_on_tail = norm(self.particles[i,[X,Y]] - self.pose[[X,Y]])
-            # if dist_on_tail > self.furthest_on_tail: self.furthest_on_tail = dist_on_tail
-
-
     # Virtual particle re-sampling
-    def measurement(self, uwb_ref, uwb_range, seg_curvature):
-        TURN_CEIL = 0.10745999999999996
-        curve_ratio = (seg_curvature/TURN_CEIL)
-
+    def measurement(self, true_pos, anchors):
         UWB_ERROR = 0.1 # Error is 10cm
         B = 1
         noise_limit = 0.1
 
-        print(f"B {B} noise_limit {noise_limit}")
-        # Do we want to change B or noise limit?
+        ref = None # choose anchor
+        max_sum_dot_product = 0
+
+        if (self.pose is None): self.estimate()
+        mean = self.pose[[X,Y]]
+
+
+        for j in range(anchors.shape[1]):
+
+            uwb_anchor = anchors[j,:]
+            v_uwb = true_pos - uwb_anchor
+            uwb_range = norm(v_uwb)
+            sum_dot_product = 0
+
+            for i in range(self.N):
+                pos = self.particles[i,[X,Y]]
+                # dist_from_ref = norm(pos - uwb_anchor) # Now just check how this distance falls on our UWB distribution
+                v_dev = mean - pos
+                sum_dot_product += abs(norm(dot(v_dev,v_uwb))) 
+
+            if sum_dot_product > max_sum_dot_product:
+                max_sum_dot_product = sum_dot_product
+                ref = uwb_anchor
+
+        print(f" Chose anchor at {ref}")
         
+        v_uwb = true_pos - ref
+        uwb_range = norm(v_uwb)
+
         sum_particle_weight = np.sum(self.particles[:,W])
         particles_replaced_count = 0
         self.norm_particles()
@@ -231,87 +248,28 @@ class ParticleFilter2:
         # Pre-integrating our normal pdf for faster cdf lookup times 
         get_p_uwb = build_p_uwb_func(uwb_range, UWB_ERROR)
 
-        if (self.pose is None): self.estimate()
-        mean = self.pose[[X,Y]]
-        v_uwb = mean - uwb_ref
-
-        
-        # dv(uwb_ref, uwb_ref + v_uwb)
 
         for i in range(self.N):
             Vparticles = np.zeros((B, self.particles.shape[1]))
             Vparticles[:] = self.particles[i]
             norm_weight = self.particles[i,W] / sum_particle_weight
             # noise = noise_func(norm_weight)
-            # noise = noise_limit * (1 - norm_weight) # Default noise function
-            # Vparticles = perturb(Vparticles, noise, noise)
-
-            pos = self.particles[i,[X,Y]]
-            dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-
-            p_uwb = get_p_uwb(dist_from_ref)
-            self.particles[i, W] = p_uwb
-
-            v_dev = mean - pos
-            alpha = abs(norm(dot(v_dev,v_uwb))) 
-            # Measure orthogonality of particle deviation direction to ultrawideband direction
-
-            unit_v_uwb = unit(v_uwb)
-            theta_rotation = rad_between_vec([1,0], unit_v_uwb)
-            R_g_to_uwb = rotation_matrix(theta_rotation)
-
-            v_dev_uwb = dot(R_g_to_uwb, v_dev) # THIS IS THE CORRECT ORDER TRUST ME DEAR GOD
-            # v_dev_uwb = dot(v_dev, R_g_to_uwb)
-
-            # dv(mean, mean+v_dev)
-            # dv(mean, mean+v_dev_uwb)
-
-            unit_dev = v_dev_uwb
-            # sigma_uwb_x = [-0.1, 0.1]
-            # Push out high weighted particles along the x-axis
-            sigma_uwb_x = np.array([ -unit_dev[X] * (0.1), unit_dev[X] * (0.1)])
-            sigma_uwb_y = np.array([ -unit_dev[Y] * (0.1), unit_dev[Y] * (0.1)])
-
-
-            # sigma_uwb_x *= (1-norm_weight)
-            # y_noise_shift = 0.15
-            # sigma_uwb_y += np.array([y_noise_shift, y_noise_shift])
-            # sigma_uwb_y *= (1-norm_weight)
-
-
-            # I think v_dev_uwb might be bugged and is very large
-            # sigma_uwb_y = [0, 0]
-            # sigma_uwb_x = [0,0]
+            noise = noise_limit * (1 - norm_weight) # Default noise function
+            Vparticles = perturb(Vparticles, noise, noise)
 
             for j in range(B):
                 pos = Vparticles[j,[X,Y]]
-
-                pos_uwb = dot(R_g_to_uwb, pos)
-
-                # Perturbed position in UWB frame
-                x_uwb_perturb = random.uniform(sigma_uwb_x[0], sigma_uwb_x[1])
-                y_uwb_perturb = random.uniform(sigma_uwb_y[0], sigma_uwb_y[1])
-                perturbation_vector = np.array((x_uwb_perturb, y_uwb_perturb))
-                Ppos_uwb = pos_uwb + perturbation_vector
-                
-                R_uwb_to_g = R_g_to_uwb.T
-                Ppos = dot(R_uwb_to_g, Ppos_uwb) # Perturbed position in global frame
-                # Ppos = dot(Ppos_uwb, R_uwb_to_g)
-                # dv(pos, Ppos)
-
-                dist_from_ref = norm(Ppos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-                
+                dist_from_ref = norm(pos - ref) # Now just check how this distance falls on our UWB distribution
                 p_uwb = get_p_uwb(dist_from_ref)
-                Vparticles[j,[X,Y]] = Ppos
+
+                Vparticles[j,[X,Y]] = pos
                 Vparticles[j,O] = self.particles[i,O]
                 Vparticles[j, W] = p_uwb
+
                 # If the weight of our virtual particle is greater, replace our original with it
-                if Vparticles[j,W] > (self.particles[i,W] * (1-0.5*seg_curvature*alpha)): 
+                if Vparticles[j,W] > (self.particles[i,W]): 
                     self.particles[i,:] = Vparticles[j,:]
                     particles_replaced_count+=1
-                # self.particles[i,W] = Vparticles[j,W]
-                # self.particles[i,:] = Vparticles[j,:]
-                # particles_replaced_count+=1
 
         self.norm_particles()
         self.show_particles()

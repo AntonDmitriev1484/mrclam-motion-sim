@@ -146,12 +146,12 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     dbg_start = 0
     # dbg_start = 100 * 100
     # dbg_end = 170 * 100
-    # dbg_end = 300 * 100
-    dbg_end = 120 * 100
+    dbg_end = 300 * 100
+    # dbg_end = 120 * 100
     # dbg_end = 4 * range_T
 
     dbg_view_T = 10*100
-    dbg_show_particles = True
+    dbg_show_particles = False
 
 
     sum_delta_angle = 0
@@ -162,6 +162,13 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
     pf = ParticleFilter2(1000)
     pf.generate(all_gt_pose[robot_id][0])
+
+    anchors = np.zeros((4, 2))
+    anchors[0, :] = np.array([0,0])
+    anchors[1, :] = np.array([5, 0])
+    anchors[2, :] = np.array([2.5, -5])
+    anchors[3, :] = np.array([2.5, 5])
+
     ref_pos2 = np.array((0,-5))
     ref_pos = np.array((0,0))
 
@@ -175,11 +182,9 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
         if t % range_T == 0:
             print(f" Range # {t/range_T}")
-
+            
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
-            v_uwb = true_pos - ref_pos
-
-            pf.measurement(ref_pos, norm(v_uwb), sum_delta_angle)
+            pf.measurement(true_pos, anchors)
 
             estimate = pf.estimate()
             estimated_poses.append(estimate)
