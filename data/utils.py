@@ -70,24 +70,6 @@ def perturb(particles, x_lim, y_lim):
     # particles[:,O] += random.uniform(-var_o, var_o) # Adding in a pinch of orientation variance does help
     return particles
 
-# More likely to drift on a harder curve, so we add more searching power to our low weight particles
-# def noise_func(w):
-#     TURN_CEIL = 0.10745999999999996
-#     curve_ratio = (seg_curvature/TURN_CEIL)
-#     center_weight = 1
-#     center_weight *= curve_ratio
-#     if center_weight == 0: return 0.05
-#     left_bound = 0
-#     right_bound = 1
-#     m_left = noise_limit / (0+center_weight)
-#     m_right = - noise_limit / (1-center_weight)
-#     if (w >= center_weight):
-#         return noise_limit + m_right*(w-center_weight)
-#     if (w < center_weight):
-#         return m_left * (w)
-#     # More curve, means add more variance further out
-#     # Less curve means add variance further in
-
 def build_p_uwb_func(uwb_range, UWB_ERROR):
     n_samples = 4000
     x_values = np.linspace(uwb_range-1, uwb_range+1,n_samples)

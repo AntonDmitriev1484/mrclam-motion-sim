@@ -61,7 +61,7 @@ for i in range(1,2):
     range_T = 30 # Ranging once every 300ms - i.e one member of the cluster gets Slammed every 300ms
     # This frequency makes a big impact on how long we can track the pose with ground truth
     SLAM_T = 1500 
-    estimated = run_pf2(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
+    estimated = run_pf(1, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=all_mes_pose)
     estimated_pose_as_pose_tuple = [ Pose(estimated[i, 0], estimated[i, 1], estimated[i, 2], estimated[i,3]) for i in range(estimated.shape[0])]
     for j in range(5):
         print(estimated_pose_as_pose_tuple[j].time)
