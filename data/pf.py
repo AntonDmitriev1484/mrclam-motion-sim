@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
+from sklearn.decomposition import PCA
 
 import random
 import math
@@ -230,8 +231,7 @@ class ParticleFilter2:
 
     # Virtual particle re-sampling
     def measurement(self, uwb_ref, uwb_range, seg_curvature):
-        TURN_CEIL = 0.10745999999999996
-        curve_ratio = (seg_curvature/TURN_CEIL)
+
         UWB_ERROR = 0.1 # Error is 10cm
         B = 5
         noise_limit = 0.1
@@ -240,22 +240,14 @@ class ParticleFilter2:
         particles_replaced_count = 0
         self.norm_particles()
 
-        # More likely to drift on a harder curve, so we add more searching power to our low weight particles
-        def noise_func(w):
-            
-            center_weight = 1
-            center_weight *= curve_ratio
-            if center_weight == 0: return 0.05
-            left_bound = 0
-            right_bound = 1
-            m_left = noise_limit / (0+center_weight)
-            m_right = - noise_limit / (1-center_weight)
-            if (w >= center_weight):
-                return noise_limit + m_right*(w-center_weight)
-            if (w < center_weight):
-                return m_left * (w)
-            # More curve, means add more variance further out
-            # Less curve means add variance further in
+        pca = PCA(n_components=2)
+        pca.fit(self.particles[:,[X,Y]])
+        dir_var = pca.components_[0]
+
+        # Debug to make sure variance direction is correct
+        if (self.pose is None): self.estimate()
+        mean = self.pose[[X,Y]]
+        dv(mean, mean+unit(dir_var))
 
         # Pre-integrating our normal pdf for faster cdf lookup times 
         get_p_uwb = build_p_uwb_func(uwb_range, UWB_ERROR)

@@ -150,13 +150,12 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     dbg_start = 0 * 100
     # dbg_end = 5*100
     # dbg_end = 120 * 100
-    # dbg_end = 300 * 100
     dbg_end = 300 * 100
     # dbg_end = 120 * 100
     # dbg_end = 80 * 100
-    dbg_show_particles = False
+    dbg_show_particles = True
 
-    dbg_view_T = 15*100
+    dbg_view_T = 10*100
 
     def check_loop(point, trajectory):
         # Note: This would completely break if we ever loop back
@@ -263,27 +262,27 @@ def run_pf2(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
         if dbg_show_particles and dbg_start < t and t % dbg_view_T ==0:
             dparticle_weights(pf.particles)
-    # plt.show()
+    
 
     print(f" Out of {range_count} ranges, {resample_count} were resamples")
 
     plt.xlabel('X (m)')
     plt.ylabel('Y (m)')
-    plt.title(f'Robot trajectory for t={dbg_end/(100)} seconds')
+    plt.title(f'Robot trajectory for t={dbg_end/(T)} seconds')
 
     # Estimated poses has less than all_gt_pose because its jsut the pf estimates so dbg_staert and dbg_end are out of bounds
-    # x, y = (estimated_poses[:,X], estimated_poses[:,Y])
-    # plt.scatter(x, y, c='blue', s=10)
+    x, y = (estimated_poses[:,X], estimated_poses[:,Y])
+    plt.scatter(x, y, c='blue', s=10)
     
-    # x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
+    x, y = ([p.x for p in all_gt_pose[robot_id][:dbg_end]] , [p.y for p in all_gt_pose[robot_id][:dbg_end]])
+    plt.scatter(x, y, c='green', s=1)
+
+    # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
     # plt.scatter(x, y, c='green', s=1)
+    x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
+    plt.scatter(x, y, c='red', s=1)
 
-    # # x, y = ([p.x for p in all_gt_pose[ref_id][:dbg_view]] , [p.y for p in all_gt_pose[ref_id][:dbg_view]])
-    # # plt.scatter(x, y, c='green', s=1)
-    # x, y = ([p.x for p in mes_pose[robot_id][:dbg_end]] , [p.y for p in mes_pose[robot_id][:dbg_end]])
-    # plt.scatter(x, y, c='red', s=1)
-
-    # plt.show()
+    plt.show()
 
     # return estimated_poses
     return full_poses
