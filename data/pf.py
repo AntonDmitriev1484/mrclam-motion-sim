@@ -51,76 +51,52 @@ class ParticleFilter:
             self.particles[i, Y] += dy
 
     # Virtual particle re-sampling
-    def measurement(self, true_pos, anchors):
+    def measurement(self, true_pos, anchors, AoA_precision, GT_orientation):
 
         UWB_ERROR = 0.1 # Error is 10cm
         B = 2
         noise_limit = 0.1
-        
-        sum_particle_weight = np.sum(self.particles[:,W])
+
         particles_replaced_count = 0
         self.norm_particles()
 
-        pca = PCA(n_components=2)
-        pca.fit(self.particles[:,[X,Y]])
-        v_var = pca.components_[0]
-        # Debug to make sure variance direction is correct
-        if (self.pose is None): self.estimate()
-        mean = self.pose[[X,Y]]
-        # dv(mean, mean+ (0.1)*unit(v_var))
-        # dv(mean, mean+ (0.1)*unit(v_uwb))
-        
-        # uwb_ref = None
-        # min_dot_product = 10
-        # for j in range(anchors.shape[0]):
-        #     uwb_anchor = anchors[j,:]
-        #     v_uwb = true_pos - uwb_anchor
-
-        #     print(f" anchor:{uwb_anchor} -> dot: {dot( unit(v_var), unit(v_uwb))}")
-        #     dot_product = abs(norm(dot( unit(v_uwb), unit(v_var)))) # Order
-
-        #     if dot_product < min_dot_product:
-        #         min_dot_product = dot_product
-        #         uwb_ref = uwb_anchor
 
         uwb_ref = anchors[0]
-        print(f" Chose anchor at {uwb_ref}")
         v_uwb = true_pos - uwb_ref
         uwb_range = norm(v_uwb)
+
 
         # Pre-integrating our normal pdf for faster cdf lookup times 
         get_p_uwb = build_p_uwb_func(uwb_range, UWB_ERROR)
 
-        for i in range(self.N):
-            v_particles = np.zeros((B, self.particles.shape[1]))
-            v_particles[:] = self.particles[i]
-            norm_weight = self.particles[i,W] / sum_particle_weight
-            # noise = noise_func(norm_weight)
-            noise = noise_limit * (1 - norm_weight) # Default noise function
-            v_particles = perturb(v_particles, noise, noise)
+        particles_out_of_AoA_bounds = 0
 
+        AoA_upper, AoA_lower = (( GT_orientation + AoA_precision/2), (GT_orientation - AoA_precision/2))
+        
+        # Still don't know if this is correct
+        # but Ima roll with it for now
+        def in_range(lower, upper, angle):
+            lower %= 2*np.pi
+            upper %= 2*np.pi
+            angle %= 2*np.pi
+            if lower > upper:
+                return angle >= lower or angle <= upper
+            return angle > lower and angle < upper
+
+        for i in range(self.N):
             pos = self.particles[i,[X,Y]]
             dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
             p_uwb = get_p_uwb(dist_from_ref)
             self.particles[i, W] = p_uwb
 
-            best_virtual = None
-            best_weight = 0
+            if not in_range(AoA_lower, AoA_upper, self.particles[i,[O]]):
+                # print(f"{self.particles[i, [O]]}")
+                # self.particles[i,W] = 0
+                self.particles[i,O] = random.uniform(AoA_lower, AoA_upper)
+                particles_out_of_AoA_bounds += 1
 
-            for j in range(B):
-                pos = v_particles[j,[X,Y]]
-                dist_from_ref = norm(pos - uwb_ref) # Now just check how this distance falls on our UWB distribution
-                p_uwb = get_p_uwb(dist_from_ref)
-                v_particles[j, W] = p_uwb
-
-                # If the weight of our virtual particle is greater, replace our original with it
-                if v_particles[j,W] > best_weight: 
-                    best_weight = v_particles[j,W]
-                    best_virtual = v_particles[j]
-            
-            if not best_virtual is None:
-                if best_virtual[W] > self.particles[i,W]: 
-                    self.particles[i] = best_virtual
+        print(f" GT: {GT_orientation} - upper: {AoA_upper} lower: {AoA_lower}")
+        print(particles_out_of_AoA_bounds)
 
         self.norm_particles()
         self.show_particles()

@@ -35,9 +35,9 @@ def run_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
     # dbg_start = 40 * 100
     dbg_start = 0
     dbg_start = 0 * 100
-    dbg_end = 200*100
+    # dbg_end = 200*100
     # dbg_end = 120 * 100
-    # dbg_end = 300 * 100
+    dbg_end = 300 * 100
     # dbg_end = 80 * 100
     dbg_show_particles = True
 
@@ -55,9 +55,6 @@ def run_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
 
     anchors = np.zeros((4, 2))
     anchors[0, :] = np.array([0,0])
-    anchors[1, :] = np.array([5, 0])
-    anchors[2, :] = np.array([2.5, -5])
-    anchors[3, :] = np.array([2.5, 5])
 
     pf = ParticleFilter(1000)
     pf.generate(estimated_poses[0])
@@ -76,7 +73,10 @@ def run_pf(robot_id, all_gt_pose, all_mes_vo, range_T, SLAM_T, mes_pose=None):
             true_pos = np.array([ all_gt_pose[robot_id][t].x, all_gt_pose[robot_id][t].y ])
             v_uwb = true_pos - ref_pos
 
-            pf.measurement(true_pos, anchors)
+            AoA_precision = np.pi
+            GT_orientation = all_gt_pose[robot_id][t].orientation
+            
+            pf.measurement(true_pos, anchors, AoA_precision, GT_orientation)
 
             estimate = pf.estimate()
             prev_pf_pose = estimate
